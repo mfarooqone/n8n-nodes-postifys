@@ -14,6 +14,15 @@ type PostifysCredentials = {
 	apiKey: string;
 };
 
+const shouldAutoProxyDownload = (mediaUrls: string, platform: string, mediaType?: string) => {
+	const lowered = String(mediaUrls || '').toLowerCase();
+	if (/(drive\.google\.com|dropbox\.com|dropboxusercontent\.com)/.test(lowered)) {
+		return true;
+	}
+
+	return platform === 'instagram' && (mediaType === 'REEL' || mediaType === 'VIDEO');
+};
+
 export class Postifys implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Postifys',
@@ -185,6 +194,20 @@ export class Postifys implements INodeType {
 				placeholder: 'https://example.com/image.jpg',
 				description: 'Public media URLs. Enter one per line or comma-separated. Instagram requires at least one URL; Postifys currently publishes the first URL.',
 			},
+			{
+				displayName: 'Proxy Download',
+				name: 'proxyDownload',
+				type: 'boolean',
+				default: false,
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['facebook', 'instagram'],
+					},
+				},
+				description: 'Let Postifys download the media to a temporary file, publish it, then delete the temp file. Automatically enabled for Google Drive and Dropbox URLs, and recommended for Instagram Reels.',
+			},
 		],
 	};
 
@@ -254,6 +277,8 @@ export class Postifys implements INodeType {
 					const pageId = this.getNodeParameter('pageId', i) as string;
 					const text = this.getNodeParameter('text', i, '') as string;
 					const mediaUrls = this.getNodeParameter('mediaUrls', i, '') as string;
+					const proxyDownload = Boolean(this.getNodeParameter('proxyDownload', i, false))
+						|| shouldAutoProxyDownload(mediaUrls, platform);
 
 					if (!text && !mediaUrls) {
 						throw new NodeOperationError(this.getNode(), 'Facebook posts require Text or Media URLs.', { itemIndex: i });
@@ -264,12 +289,15 @@ export class Postifys implements INodeType {
 						pageId,
 						text,
 						mediaUrls,
+						proxyDownload,
 					};
 				} else if (platform === 'instagram') {
 					const instagramAccountId = this.getNodeParameter('instagramAccountId', i) as string;
 					const mediaType = this.getNodeParameter('mediaType', i) as string;
 					const text = this.getNodeParameter('text', i, '') as string;
 					const mediaUrls = this.getNodeParameter('mediaUrls', i) as string;
+					const proxyDownload = Boolean(this.getNodeParameter('proxyDownload', i, false))
+						|| shouldAutoProxyDownload(mediaUrls, platform, mediaType);
 
 					if (!mediaUrls) {
 						throw new NodeOperationError(this.getNode(), 'Instagram posts require Media URLs.', { itemIndex: i });
@@ -281,6 +309,7 @@ export class Postifys implements INodeType {
 						type: mediaType,
 						text,
 						mediaUrls,
+						proxyDownload,
 					};
 				} else {
 					throw new NodeOperationError(this.getNode(), `Unsupported platform: ${platform}`, { itemIndex: i });

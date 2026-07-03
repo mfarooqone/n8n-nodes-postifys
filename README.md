@@ -69,6 +69,16 @@ The node calls:
 POST /api/instagram/post
 ```
 
+### Google Drive and proxy download
+
+For Google Drive, Dropbox, or other links that Instagram cannot fetch directly, enable **Proxy Download** or use a Google Drive URL directly. Postifys will:
+
+1. Download the file to a temporary location on the server
+2. Publish the Reel or image to Instagram
+3. Delete the temporary file
+
+Google Drive links such as `https://drive.google.com/uc?export=download&id=FILE_ID` automatically enable proxy mode. The file must be shared as **Anyone with the link**.
+
 ## Install in n8n
 
 In n8n, go to **Settings → Community Nodes**, then install:
