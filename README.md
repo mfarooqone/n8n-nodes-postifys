@@ -7,7 +7,8 @@ Publish Facebook and Instagram posts from n8n through [Postifys](https://postify
 - Credential type for your Postifys API key
 - Credential test using your Postifys server
 - Dynamic dropdowns for connected Facebook Pages and Instagram accounts
-- Publish Facebook Page posts
+- Publish Facebook Page images
+- Publish Facebook Page Reels
 - Publish Instagram images
 - Publish Instagram videos/Reels
 
@@ -44,8 +45,15 @@ Add the **Postifys** node.
 - Operation: `Create`
 - Platform: `Facebook`
 - Facebook Page: select a connected Page
+- Media Type: `Image` or `Video / Reel`
 - Text: post text
 - Media URLs: optional URL list, one per line or comma-separated
+
+Facebook media publishes natively:
+
+- `Image` uses the Facebook Page photos API
+- `Video / Reel` uses the Facebook Reels API
+- Text-only Facebook posts are sent as feed posts
 
 The node calls:
 
@@ -71,10 +79,10 @@ POST /api/instagram/post
 
 ### Google Drive and proxy download
 
-For Google Drive, Dropbox, or other links that Instagram cannot fetch directly, enable **Proxy Download** or use a Google Drive URL directly. Postifys will:
+For Google Drive, Dropbox, or other links that Meta cannot fetch directly, enable **Proxy Download** or use a Google Drive URL directly. Postifys will:
 
 1. Download the file to a temporary location on the server
-2. Publish the Reel or image to Instagram
+2. Publish the Reel or image to Facebook or Instagram
 3. Delete the temporary file
 
 Google Drive links such as `https://drive.google.com/uc?export=download&id=FILE_ID` automatically enable proxy mode. The file must be shared as **Anyone with the link**.

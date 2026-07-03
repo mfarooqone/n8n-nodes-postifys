@@ -20,7 +20,7 @@ const shouldAutoProxyDownload = (mediaUrls: string, platform: string, mediaType?
 		return true;
 	}
 
-	return platform === 'instagram' && (mediaType === 'REEL' || mediaType === 'VIDEO');
+	return ['facebook', 'instagram'].includes(platform) && (mediaType === 'REEL' || mediaType === 'VIDEO');
 };
 
 export class Postifys implements INodeType {
@@ -130,7 +130,7 @@ export class Postifys implements INodeType {
 					show: {
 						resource: ['post'],
 						operation: ['create'],
-						platform: ['instagram'],
+						platform: ['facebook', 'instagram'],
 					},
 				},
 				default: '',
@@ -158,6 +158,7 @@ export class Postifys implements INodeType {
 					},
 				],
 				default: 'IMAGE',
+				description: 'Choose Image for native photo posts or Video / Reel for Reels.',
 			},
 			{
 				displayName: 'Text',
@@ -275,10 +276,11 @@ export class Postifys implements INodeType {
 
 				if (platform === 'facebook') {
 					const pageId = this.getNodeParameter('pageId', i) as string;
+					const mediaType = this.getNodeParameter('mediaType', i) as string;
 					const text = this.getNodeParameter('text', i, '') as string;
 					const mediaUrls = this.getNodeParameter('mediaUrls', i, '') as string;
 					const proxyDownload = Boolean(this.getNodeParameter('proxyDownload', i, false))
-						|| shouldAutoProxyDownload(mediaUrls, platform);
+						|| shouldAutoProxyDownload(mediaUrls, platform, mediaType);
 
 					if (!text && !mediaUrls) {
 						throw new NodeOperationError(this.getNode(), 'Facebook posts require Text or Media URLs.', { itemIndex: i });
@@ -287,6 +289,7 @@ export class Postifys implements INodeType {
 					endpoint = '/api/facebook/post';
 					body = {
 						pageId,
+						type: mediaUrls ? mediaType : 'FEED',
 						text,
 						mediaUrls,
 						proxyDownload,
