@@ -1,18 +1,24 @@
 import type {
 	IExecuteFunctions,
 	ILoadOptionsFunctions,
+	INode,
 	INodeExecutionData,
 	INodePropertyOptions,
 	INodeType,
 	INodeTypeDescription,
 	IRequestOptions,
 } from 'n8n-workflow';
-import { NodeOperationError } from 'n8n-workflow';
+import { NodeApiError, NodeOperationError } from 'n8n-workflow';
 
 type PostifysCredentials = {
 	serverUrl: string;
 	apiKey: string;
 };
+
+const normalizeMediaUrls = (value: string) => String(value || '')
+	.split(/\r?\n|,/)
+	.map((item) => item.trim())
+	.filter(Boolean);
 
 const shouldAutoProxyDownload = (mediaUrls: string, platform: string, mediaType?: string) => {
 	const lowered = String(mediaUrls || '').toLowerCase();
@@ -23,6 +29,29 @@ const shouldAutoProxyDownload = (mediaUrls: string, platform: string, mediaType?
 	return ['facebook', 'instagram'].includes(platform) && (mediaType === 'REEL' || mediaType === 'VIDEO');
 };
 
+const parsePostifysError = (error: unknown) => {
+	const apiError = error as {
+		message?: string;
+		response?: { body?: { error?: string; code?: string } };
+	};
+
+	return {
+		message: apiError.response?.body?.error || apiError.message || 'Postifys request failed.',
+		code: apiError.response?.body?.code || 'POSTIFYS_REQUEST_FAILED',
+	};
+};
+
+const assertAccountId = (
+	node: INode,
+	itemIndex: number,
+	value: string,
+	label: string,
+) => {
+	if (!String(value || '').trim()) {
+		throw new NodeOperationError(node, `${label} is required. Reconnect Meta in Postifys and reload the dropdown.`, { itemIndex });
+	}
+};
+
 export class Postifys implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Postifys',
@@ -31,7 +60,7 @@ export class Postifys implements INodeType {
 		group: ['output'],
 		version: 1,
 		subtitle: '={{$parameter["platform"]}}',
-		description: 'Publish Facebook and Instagram posts through Postifys',
+		description: 'Publish Facebook, Instagram, and TikTok posts through Postifys',
 		defaults: {
 			name: 'Postifys',
 		},
@@ -96,6 +125,10 @@ export class Postifys implements INodeType {
 						name: 'Instagram',
 						value: 'instagram',
 					},
+					{
+						name: 'TikTok',
+						value: 'tiktok',
+					},
 				],
 				default: 'facebook',
 				description: 'Social platform to publish to.',
@@ -137,6 +170,34 @@ export class Postifys implements INodeType {
 				description: 'Connected Instagram professional account to publish to.',
 			},
 			{
+				displayName: 'Facebook Post Mode',
+				name: 'facebookPostMode',
+				type: 'options',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['facebook'],
+					},
+				},
+				options: [
+					{
+						name: 'Feed (Text / Link)',
+						value: 'FEED',
+					},
+					{
+						name: 'Image',
+						value: 'IMAGE',
+					},
+					{
+						name: 'Video / Reel',
+						value: 'REEL',
+					},
+				],
+				default: 'REEL',
+				description: 'Choose Feed for text or link posts, Image for native photos, or Video / Reel for Facebook Reels.',
+			},
+			{
 				displayName: 'Media Type',
 				name: 'mediaType',
 				type: 'options',
@@ -144,7 +205,7 @@ export class Postifys implements INodeType {
 					show: {
 						resource: ['post'],
 						operation: ['create'],
-						platform: ['facebook', 'instagram'],
+						platform: ['instagram'],
 					},
 				},
 				options: [
@@ -158,7 +219,7 @@ export class Postifys implements INodeType {
 					},
 				],
 				default: 'IMAGE',
-				description: 'Choose Image for native photo posts or Video / Reel for Reels.',
+				description: 'Choose Image for photo posts or Video / Reel for Instagram Reels.',
 			},
 			{
 				displayName: 'Text',
@@ -178,6 +239,23 @@ export class Postifys implements INodeType {
 				description: 'Post text or Instagram caption. For Facebook, Text or Media URLs is required.',
 			},
 			{
+				displayName: 'Caption',
+				name: 'caption',
+				type: 'string',
+				typeOptions: {
+					rows: 4,
+				},
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['tiktok'],
+					},
+				},
+				default: '',
+				description: 'TikTok video caption.',
+			},
+			{
 				displayName: 'Media URLs',
 				name: 'mediaUrls',
 				type: 'string',
@@ -193,7 +271,22 @@ export class Postifys implements INodeType {
 				},
 				default: '',
 				placeholder: 'https://example.com/image.jpg',
-				description: 'Public media URLs. Enter one per line or comma-separated. Instagram requires at least one URL; Postifys currently publishes the first URL.',
+				description: 'Public media URLs. Enter one per line or comma-separated. Postifys publishes the first URL.',
+			},
+			{
+				displayName: 'Video URL',
+				name: 'videoUrl',
+				type: 'string',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['tiktok'],
+					},
+				},
+				default: '',
+				placeholder: 'https://example.com/video.mp4',
+				description: 'Public TikTok video URL.',
 			},
 			{
 				displayName: 'Proxy Download',
@@ -207,7 +300,7 @@ export class Postifys implements INodeType {
 						platform: ['facebook', 'instagram'],
 					},
 				},
-				description: 'Let Postifys download the media to a temporary file, publish it, then delete the temp file. Automatically enabled for Google Drive and Dropbox URLs, and recommended for Instagram Reels.',
+				description: 'Let Postifys download the media to a temporary file, publish it, then delete the temp file. Automatically enabled for Google Drive and Dropbox URLs.',
 			},
 		],
 	};
@@ -276,20 +369,26 @@ export class Postifys implements INodeType {
 
 				if (platform === 'facebook') {
 					const pageId = this.getNodeParameter('pageId', i) as string;
-					const mediaType = this.getNodeParameter('mediaType', i) as string;
+					const facebookPostMode = this.getNodeParameter('facebookPostMode', i) as string;
 					const text = this.getNodeParameter('text', i, '') as string;
-					const mediaUrls = this.getNodeParameter('mediaUrls', i, '') as string;
+					const mediaUrls = normalizeMediaUrls(this.getNodeParameter('mediaUrls', i, '') as string);
 					const proxyDownload = Boolean(this.getNodeParameter('proxyDownload', i, false))
-						|| shouldAutoProxyDownload(mediaUrls, platform, mediaType);
+						|| shouldAutoProxyDownload(mediaUrls.join('\n'), platform, facebookPostMode);
 
-					if (!text && !mediaUrls) {
+					assertAccountId(this.getNode(), i, pageId, 'Facebook Page');
+
+					if (!text && !mediaUrls.length) {
 						throw new NodeOperationError(this.getNode(), 'Facebook posts require Text or Media URLs.', { itemIndex: i });
+					}
+
+					if ((facebookPostMode === 'IMAGE' || facebookPostMode === 'REEL') && !mediaUrls.length) {
+						throw new NodeOperationError(this.getNode(), `Media URLs are required for Facebook ${facebookPostMode.toLowerCase()} posts.`, { itemIndex: i });
 					}
 
 					endpoint = '/api/facebook/post';
 					body = {
 						pageId,
-						type: mediaUrls ? mediaType : 'FEED',
+						type: mediaUrls.length ? facebookPostMode : 'FEED',
 						text,
 						mediaUrls,
 						proxyDownload,
@@ -298,11 +397,13 @@ export class Postifys implements INodeType {
 					const instagramAccountId = this.getNodeParameter('instagramAccountId', i) as string;
 					const mediaType = this.getNodeParameter('mediaType', i) as string;
 					const text = this.getNodeParameter('text', i, '') as string;
-					const mediaUrls = this.getNodeParameter('mediaUrls', i) as string;
+					const mediaUrls = normalizeMediaUrls(this.getNodeParameter('mediaUrls', i, '') as string);
 					const proxyDownload = Boolean(this.getNodeParameter('proxyDownload', i, false))
-						|| shouldAutoProxyDownload(mediaUrls, platform, mediaType);
+						|| shouldAutoProxyDownload(mediaUrls.join('\n'), platform, mediaType);
 
-					if (!mediaUrls) {
+					assertAccountId(this.getNode(), i, instagramAccountId, 'Instagram account');
+
+					if (!mediaUrls.length) {
 						throw new NodeOperationError(this.getNode(), 'Instagram posts require Media URLs.', { itemIndex: i });
 					}
 
@@ -313,6 +414,19 @@ export class Postifys implements INodeType {
 						text,
 						mediaUrls,
 						proxyDownload,
+					};
+				} else if (platform === 'tiktok') {
+					const videoUrl = this.getNodeParameter('videoUrl', i, '') as string;
+					const caption = this.getNodeParameter('caption', i, '') as string;
+
+					if (!String(videoUrl || '').trim()) {
+						throw new NodeOperationError(this.getNode(), 'TikTok posts require a Video URL.', { itemIndex: i });
+					}
+
+					endpoint = '/api/tiktok/post';
+					body = {
+						videoUrl,
+						caption,
 					};
 				} else {
 					throw new NodeOperationError(this.getNode(), `Unsupported platform: ${platform}`, { itemIndex: i });
@@ -339,10 +453,14 @@ export class Postifys implements INodeType {
 					},
 				});
 			} catch (error) {
+				const parsed = parsePostifysError(error);
+
 				if (this.continueOnFail()) {
 					returnData.push({
 						json: {
-							error: error instanceof Error ? error.message : String(error),
+							success: false,
+							error: parsed.message,
+							code: parsed.code,
 						},
 						pairedItem: {
 							item: i,
@@ -351,7 +469,10 @@ export class Postifys implements INodeType {
 					continue;
 				}
 
-				throw error;
+				throw new NodeApiError(this.getNode(), error as { message: string }, {
+					message: parsed.message,
+					description: parsed.code,
+				});
 			}
 		}
 
