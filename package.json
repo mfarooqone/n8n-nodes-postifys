@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-postifys",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "n8n community node for publishing Facebook and Instagram posts through Postifys.",
   "keywords": [
     "n8n-community-node-package",
