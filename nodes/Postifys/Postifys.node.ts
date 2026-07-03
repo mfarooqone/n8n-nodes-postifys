@@ -130,7 +130,7 @@ export class Postifys implements INodeType {
 					show: {
 						resource: ['post'],
 						operation: ['create'],
-						platform: ['facebook', 'instagram'],
+						platform: ['instagram'],
 					},
 				},
 				default: '',
@@ -144,7 +144,7 @@ export class Postifys implements INodeType {
 					show: {
 						resource: ['post'],
 						operation: ['create'],
-						platform: ['instagram'],
+						platform: ['facebook', 'instagram'],
 					},
 				},
 				options: [
