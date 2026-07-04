@@ -224,6 +224,24 @@ export class Postifys implements INodeType {
 				description: 'Connected YouTube channel to upload to.',
 			},
 			{
+				displayName: 'Pinterest Account',
+				name: 'pinterestUserId',
+				type: 'options',
+				typeOptions: {
+					loadOptionsMethod: 'getPinterestAccounts',
+				},
+				required: true,
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['pinterest'],
+					},
+				},
+				default: '',
+				description: 'Connected Pinterest account to publish from.',
+			},
+			{
 				displayName: 'Pinterest Board',
 				name: 'boardId',
 				type: 'options',
@@ -568,13 +586,40 @@ export class Postifys implements INodeType {
 				}));
 			},
 
-			async getPinterestBoards(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+			async getPinterestAccounts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 				const credentials = await this.getCredentials('postifysApi') as PostifysCredentials;
 				const baseURL = String(credentials.serverUrl || '').replace(/\/$/, '');
 				const response = await this.helpers.requestWithAuthentication.call(this, 'postifysApi', {
 					method: 'GET',
 					baseURL,
-					uri: '/api/pinterest/boards',
+					uri: '/api/pinterest/accounts',
+					json: true,
+				});
+				const accounts = Array.isArray(response.accounts) ? response.accounts : [];
+				if (!accounts.length) {
+					return [{
+						name: 'No Pinterest accounts found. Connect Pinterest in Postifys.',
+						value: '',
+						description: 'Open Postifys, connect Pinterest, then reload this dropdown.',
+					}];
+				}
+				return accounts.map((account: { id: string; username?: string; name?: string }) => ({
+					name: account.username ? `@${account.username}` : account.name || account.id,
+					value: account.id,
+				}));
+			},
+
+			async getPinterestBoards(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				const credentials = await this.getCredentials('postifysApi') as PostifysCredentials;
+				const baseURL = String(credentials.serverUrl || '').replace(/\/$/, '');
+				const pinterestUserId = String(this.getNodeParameter('pinterestUserId', 0) || '').trim();
+				const uri = pinterestUserId
+					? `/api/pinterest/boards?pinterestUserId=${encodeURIComponent(pinterestUserId)}`
+					: '/api/pinterest/boards';
+				const response = await this.helpers.requestWithAuthentication.call(this, 'postifysApi', {
+					method: 'GET',
+					baseURL,
+					uri,
 					json: true,
 				});
 				const boards = Array.isArray(response.boards) ? response.boards : [];
@@ -688,6 +733,7 @@ export class Postifys implements INodeType {
 						proxyDownload: true,
 					};
 				} else if (platform === 'pinterest') {
+					const pinterestUserId = this.getNodeParameter('pinterestUserId', i) as string;
 					const boardId = this.getNodeParameter('boardId', i) as string;
 					const title = this.getNodeParameter('title', i, '') as string;
 					const description = this.getNodeParameter('description', i, '') as string;
@@ -698,6 +744,7 @@ export class Postifys implements INodeType {
 					const proxyDownload = Boolean(this.getNodeParameter('proxyDownload', i, false))
 						|| shouldAutoProxyDownload(resolvedImageUrl, platform);
 
+					assertAccountId(this.getNode(), i, pinterestUserId, 'Pinterest Account');
 					assertAccountId(this.getNode(), i, boardId, 'Pinterest Board');
 
 					if (!String(title || '').trim()) {
@@ -710,6 +757,7 @@ export class Postifys implements INodeType {
 
 					endpoint = '/api/pinterest/post';
 					body = {
+						pinterestUserId,
 						boardId,
 						title,
 						description,
