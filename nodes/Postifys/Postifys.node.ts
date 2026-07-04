@@ -202,6 +202,24 @@ export class Postifys implements INodeType {
 				description: 'Choose Feed for text or link posts, Image for native photos, or Video / Reel for Facebook Reels.',
 			},
 			{
+				displayName: 'YouTube Channel',
+				name: 'channelId',
+				type: 'options',
+				typeOptions: {
+					loadOptionsMethod: 'getYouTubeChannels',
+				},
+				required: true,
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['youtube'],
+					},
+				},
+				default: '',
+				description: 'Connected YouTube channel to upload to.',
+			},
+			{
 				displayName: 'Media Type',
 				name: 'mediaType',
 				type: 'options',
@@ -459,6 +477,29 @@ export class Postifys implements INodeType {
 					value: account.id,
 				}));
 			},
+
+			async getYouTubeChannels(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				const credentials = await this.getCredentials('postifysApi') as PostifysCredentials;
+				const baseURL = String(credentials.serverUrl || '').replace(/\/$/, '');
+				const response = await this.helpers.requestWithAuthentication.call(this, 'postifysApi', {
+					method: 'GET',
+					baseURL,
+					uri: '/api/youtube/channels',
+					json: true,
+				});
+				const channels = Array.isArray(response.channels) ? response.channels : [];
+				if (!channels.length) {
+					return [{
+						name: 'No YouTube channels found. Connect YouTube in Postifys.',
+						value: '',
+						description: 'Open Postifys, connect YouTube, then reload this dropdown.',
+					}];
+				}
+				return channels.map((channel: { id: string; name?: string }) => ({
+					name: channel.name || channel.id,
+					value: channel.id,
+				}));
+			},
 		},
 	};
 
@@ -523,6 +564,7 @@ export class Postifys implements INodeType {
 						proxyDownload,
 					};
 				} else if (platform === 'youtube') {
+					const channelId = this.getNodeParameter('channelId', i) as string;
 					const title = this.getNodeParameter('title', i, '') as string;
 					const description = this.getNodeParameter('description', i, '') as string;
 					const videoUrl = this.getNodeParameter('videoUrl', i, '') as string;
@@ -530,6 +572,8 @@ export class Postifys implements INodeType {
 					const tags = this.getNodeParameter('tags', i, '') as string;
 					const categoryId = this.getNodeParameter('categoryId', i, '22') as string;
 					const notifySubscribers = this.getNodeParameter('notifySubscribers', i, false) as boolean;
+
+					assertAccountId(this.getNode(), i, channelId, 'YouTube Channel');
 
 					if (!String(title || '').trim()) {
 						throw new NodeOperationError(this.getNode(), 'YouTube posts require a Title.', { itemIndex: i });
@@ -541,6 +585,7 @@ export class Postifys implements INodeType {
 
 					endpoint = '/api/youtube/post';
 					body = {
+						channelId,
 						title,
 						description,
 						videoUrl,

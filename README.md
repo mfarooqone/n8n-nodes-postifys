@@ -95,6 +95,7 @@ Google Drive links such as `https://drive.google.com/uc?export=download&id=FILE_
 - Resource: `Post`
 - Operation: `Create`
 - Platform: `YouTube`
+- YouTube Channel: select the connected channel
 - Title: video title
 - Description: video description
 - Video URL: public downloadable video URL
