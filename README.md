@@ -2,6 +2,8 @@
 
 Publish Facebook, Instagram, YouTube, and TikTok posts from n8n through [Postifys](https://postifys.com).
 
+**API documentation:** https://postifys.com/api-docs
+
 ## Features
 
 - Credential type for your Postifys API key
@@ -16,11 +18,11 @@ Publish Facebook, Instagram, YouTube, and TikTok posts from n8n through [Postify
 
 ## Prerequisites
 
-1. Log in to Postifys.
-2. Open `https://postifys.com/settings`.
-3. Create an API key.
-4. Connect your Facebook Pages and Instagram professional accounts in Postifys.
-5. Connect your YouTube channel in Postifys if you want to upload YouTube videos.
+1. Log in to Postifys at https://postifys.com/login
+2. Open https://postifys.com/settings and create an API key
+3. Connect your Facebook Pages and Instagram professional accounts in Postifys
+4. Connect your YouTube channel in Postifys if you want to upload YouTube videos
+5. Read the full REST API reference at https://postifys.com/api-docs
 
 ## Credentials
 

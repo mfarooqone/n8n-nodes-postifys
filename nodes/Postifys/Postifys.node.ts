@@ -60,7 +60,7 @@ export class Postifys implements INodeType {
 		group: ['output'],
 		version: 1,
 		subtitle: '={{$parameter["platform"]}}',
-	description: 'Publish Facebook, Instagram, YouTube, and TikTok posts through Postifys',
+	description: 'Publish Facebook, Instagram, YouTube, Pinterest, and TikTok posts through Postifys',
 		defaults: {
 			name: 'Postifys',
 		},
@@ -128,6 +128,10 @@ export class Postifys implements INodeType {
 					{
 						name: 'YouTube',
 						value: 'youtube',
+					},
+					{
+						name: 'Pinterest',
+						value: 'pinterest',
 					},
 					{
 						name: 'TikTok',
@@ -220,6 +224,24 @@ export class Postifys implements INodeType {
 				description: 'Connected YouTube channel to upload to.',
 			},
 			{
+				displayName: 'Pinterest Board',
+				name: 'boardId',
+				type: 'options',
+				typeOptions: {
+					loadOptionsMethod: 'getPinterestBoards',
+				},
+				required: true,
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['pinterest'],
+					},
+				},
+				default: '',
+				description: 'Connected Pinterest board to publish to.',
+			},
+			{
 				displayName: 'Media Type',
 				name: 'mediaType',
 				type: 'options',
@@ -285,12 +307,12 @@ export class Postifys implements INodeType {
 					show: {
 						resource: ['post'],
 						operation: ['create'],
-						platform: ['youtube'],
+						platform: ['youtube', 'pinterest'],
 					},
 				},
 				default: '',
 				required: true,
-				description: 'YouTube video title.',
+				description: 'YouTube video title or Pinterest pin title.',
 			},
 			{
 				displayName: 'Description',
@@ -303,11 +325,26 @@ export class Postifys implements INodeType {
 					show: {
 						resource: ['post'],
 						operation: ['create'],
-						platform: ['youtube'],
+						platform: ['youtube', 'pinterest'],
 					},
 				},
 				default: '',
-				description: 'YouTube video description.',
+				description: 'YouTube video description or Pinterest pin description.',
+			},
+			{
+				displayName: 'Link',
+				name: 'link',
+				type: 'string',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['pinterest'],
+					},
+				},
+				default: '',
+				placeholder: 'https://example.com',
+				description: 'Optional destination URL for the Pinterest pin.',
 			},
 			{
 				displayName: 'Media URLs',
@@ -326,6 +363,21 @@ export class Postifys implements INodeType {
 				default: '',
 				placeholder: 'https://example.com/image.jpg',
 				description: 'Public media URLs. Enter one per line or comma-separated. Postifys publishes the first URL.',
+			},
+			{
+				displayName: 'Image URL',
+				name: 'imageUrl',
+				type: 'string',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['pinterest'],
+					},
+				},
+				default: '',
+				placeholder: 'https://example.com/pin-image.jpg',
+				description: 'Public image URL for the Pinterest pin.',
 			},
 			{
 				displayName: 'Video URL',
@@ -437,7 +489,7 @@ export class Postifys implements INodeType {
 					show: {
 						resource: ['post'],
 						operation: ['create'],
-						platform: ['facebook', 'instagram', 'youtube'],
+						platform: ['facebook', 'instagram', 'youtube', 'pinterest'],
 					},
 				},
 				description: 'Let Postifys download the media to a temporary file, publish it, then delete the temp file. Automatically enabled for Google Drive and Dropbox URLs.',
@@ -513,6 +565,29 @@ export class Postifys implements INodeType {
 				return channels.map((channel: { id: string; name?: string }) => ({
 					name: channel.name || channel.id,
 					value: channel.id,
+				}));
+			},
+
+			async getPinterestBoards(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				const credentials = await this.getCredentials('postifysApi') as PostifysCredentials;
+				const baseURL = String(credentials.serverUrl || '').replace(/\/$/, '');
+				const response = await this.helpers.requestWithAuthentication.call(this, 'postifysApi', {
+					method: 'GET',
+					baseURL,
+					uri: '/api/pinterest/boards',
+					json: true,
+				});
+				const boards = Array.isArray(response.boards) ? response.boards : [];
+				if (!boards.length) {
+					return [{
+						name: 'No Pinterest boards found. Connect Pinterest in Postifys.',
+						value: '',
+						description: 'Open Postifys, connect Pinterest, then reload this dropdown.',
+					}];
+				}
+				return boards.map((board: { id: string; name?: string }) => ({
+					name: board.name || board.id,
+					value: board.id,
 				}));
 			},
 		},
@@ -611,6 +686,36 @@ export class Postifys implements INodeType {
 						categoryId,
 						notifySubscribers,
 						proxyDownload: true,
+					};
+				} else if (platform === 'pinterest') {
+					const boardId = this.getNodeParameter('boardId', i) as string;
+					const title = this.getNodeParameter('title', i, '') as string;
+					const description = this.getNodeParameter('description', i, '') as string;
+					const link = this.getNodeParameter('link', i, '') as string;
+					const imageUrl = this.getNodeParameter('imageUrl', i, '') as string;
+					const mediaUrls = normalizeMediaUrls(this.getNodeParameter('mediaUrls', i, '') as string);
+					const resolvedImageUrl = String(imageUrl || mediaUrls[0] || '').trim();
+					const proxyDownload = Boolean(this.getNodeParameter('proxyDownload', i, false))
+						|| shouldAutoProxyDownload(resolvedImageUrl, platform);
+
+					assertAccountId(this.getNode(), i, boardId, 'Pinterest Board');
+
+					if (!String(title || '').trim()) {
+						throw new NodeOperationError(this.getNode(), 'Pinterest pins require a Title.', { itemIndex: i });
+					}
+
+					if (!resolvedImageUrl) {
+						throw new NodeOperationError(this.getNode(), 'Pinterest pins require an Image URL.', { itemIndex: i });
+					}
+
+					endpoint = '/api/pinterest/post';
+					body = {
+						boardId,
+						title,
+						description,
+						link,
+						imageUrl: resolvedImageUrl,
+						proxyDownload,
 					};
 				} else if (platform === 'tiktok') {
 					const videoUrl = this.getNodeParameter('videoUrl', i, '') as string;
