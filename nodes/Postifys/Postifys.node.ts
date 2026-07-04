@@ -412,12 +412,12 @@ export class Postifys implements INodeType {
 					show: {
 						resource: ['post'],
 						operation: ['create'],
-						platform: ['pinterest'],
+						platform: ['pinterest', 'linkedin'],
 					},
 				},
 				default: '',
 				placeholder: 'https://example.com/pin-image.jpg',
-				description: 'Public image URL for the Pinterest pin.',
+				description: 'Public image URL for the Pinterest pin or LinkedIn image post.',
 			},
 			{
 				displayName: 'Video URL',
@@ -815,6 +815,7 @@ export class Postifys implements INodeType {
 					const text = this.getNodeParameter('text', i, '') as string;
 					const title = this.getNodeParameter('title', i, '') as string;
 					const link = this.getNodeParameter('link', i, '') as string;
+					const imageUrl = this.getNodeParameter('imageUrl', i, '') as string;
 
 					assertAccountId(this.getNode(), i, linkedinUserId, 'LinkedIn Account');
 
@@ -828,6 +829,7 @@ export class Postifys implements INodeType {
 						text,
 						title,
 						link,
+						imageUrl,
 					};
 				} else if (platform === 'tiktok') {
 					const videoUrl = this.getNodeParameter('videoUrl', i, '') as string;

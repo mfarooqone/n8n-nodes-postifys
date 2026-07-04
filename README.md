@@ -145,7 +145,8 @@ POST /api/pinterest/post
 - Platform: `LinkedIn`
 - LinkedIn Account: select a connected LinkedIn member account
 - Text: required post text
-- Title: optional link title
+- Image URL: optional public image URL for a real LinkedIn image post
+- Title: optional image or link title
 - Link: optional URL for a LinkedIn link preview
 
 The node calls:
