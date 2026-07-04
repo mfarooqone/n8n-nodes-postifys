@@ -60,7 +60,7 @@ export class Postifys implements INodeType {
 		group: ['output'],
 		version: 1,
 		subtitle: '={{$parameter["platform"]}}',
-	description: 'Publish Facebook, Instagram, YouTube, Pinterest, and TikTok posts through Postifys',
+	description: 'Publish Facebook, Instagram, YouTube, Pinterest, LinkedIn, and TikTok posts through Postifys',
 		defaults: {
 			name: 'Postifys',
 		},
@@ -132,6 +132,10 @@ export class Postifys implements INodeType {
 					{
 						name: 'Pinterest',
 						value: 'pinterest',
+					},
+					{
+						name: 'LinkedIn',
+						value: 'linkedin',
 					},
 					{
 						name: 'TikTok',
@@ -260,6 +264,24 @@ export class Postifys implements INodeType {
 				description: 'Connected Pinterest board to publish to.',
 			},
 			{
+				displayName: 'LinkedIn Account',
+				name: 'linkedinUserId',
+				type: 'options',
+				typeOptions: {
+					loadOptionsMethod: 'getLinkedInAccounts',
+				},
+				required: true,
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['linkedin'],
+					},
+				},
+				default: '',
+				description: 'Connected LinkedIn member account to publish to.',
+			},
+			{
 				displayName: 'Media Type',
 				name: 'mediaType',
 				type: 'options',
@@ -294,11 +316,11 @@ export class Postifys implements INodeType {
 					show: {
 						resource: ['post'],
 						operation: ['create'],
-						platform: ['facebook', 'instagram'],
+						platform: ['facebook', 'instagram', 'linkedin'],
 					},
 				},
 				default: '',
-				description: 'Post text or Instagram caption. For Facebook, Text or Media URLs is required.',
+				description: 'Post text or caption. For LinkedIn, Text is required.',
 			},
 			{
 				displayName: 'Caption',
@@ -325,12 +347,12 @@ export class Postifys implements INodeType {
 					show: {
 						resource: ['post'],
 						operation: ['create'],
-						platform: ['youtube', 'pinterest'],
+						platform: ['youtube', 'pinterest', 'linkedin'],
 					},
 				},
 				default: '',
-				required: true,
-				description: 'YouTube video title or Pinterest pin title.',
+				required: false,
+				description: 'YouTube video title, Pinterest pin title, or optional LinkedIn link title.',
 			},
 			{
 				displayName: 'Description',
@@ -357,12 +379,12 @@ export class Postifys implements INodeType {
 					show: {
 						resource: ['post'],
 						operation: ['create'],
-						platform: ['pinterest'],
+						platform: ['pinterest', 'linkedin'],
 					},
 				},
 				default: '',
 				placeholder: 'https://example.com',
-				description: 'Optional destination URL for the Pinterest pin.',
+				description: 'Optional destination URL for the Pinterest pin or LinkedIn link preview.',
 			},
 			{
 				displayName: 'Media URLs',
@@ -635,6 +657,29 @@ export class Postifys implements INodeType {
 					value: board.id,
 				}));
 			},
+
+			async getLinkedInAccounts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				const credentials = await this.getCredentials('postifysApi') as PostifysCredentials;
+				const baseURL = String(credentials.serverUrl || '').replace(/\/$/, '');
+				const response = await this.helpers.requestWithAuthentication.call(this, 'postifysApi', {
+					method: 'GET',
+					baseURL,
+					uri: '/api/linkedin/accounts',
+					json: true,
+				});
+				const accounts = Array.isArray(response.accounts) ? response.accounts : [];
+				if (!accounts.length) {
+					return [{
+						name: 'No LinkedIn accounts found. Connect LinkedIn in Postifys.',
+						value: '',
+						description: 'Open Postifys, connect LinkedIn, then reload this dropdown.',
+					}];
+				}
+				return accounts.map((account: { id: string; name?: string; email?: string }) => ({
+					name: account.email ? `${account.name || account.id} (${account.email})` : account.name || account.id,
+					value: account.id,
+				}));
+			},
 		},
 	};
 
@@ -764,6 +809,25 @@ export class Postifys implements INodeType {
 						link,
 						imageUrl: resolvedImageUrl,
 						proxyDownload,
+					};
+				} else if (platform === 'linkedin') {
+					const linkedinUserId = this.getNodeParameter('linkedinUserId', i) as string;
+					const text = this.getNodeParameter('text', i, '') as string;
+					const title = this.getNodeParameter('title', i, '') as string;
+					const link = this.getNodeParameter('link', i, '') as string;
+
+					assertAccountId(this.getNode(), i, linkedinUserId, 'LinkedIn Account');
+
+					if (!String(text || '').trim()) {
+						throw new NodeOperationError(this.getNode(), 'LinkedIn posts require Text.', { itemIndex: i });
+					}
+
+					endpoint = '/api/linkedin/post';
+					body = {
+						linkedinUserId,
+						text,
+						title,
+						link,
 					};
 				} else if (platform === 'tiktok') {
 					const videoUrl = this.getNodeParameter('videoUrl', i, '') as string;

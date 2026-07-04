@@ -1,7 +1,7 @@
 {
   "name": "n8n-nodes-postifys",
-  "version": "0.4.2",
-  "description": "n8n community node for publishing Facebook, Instagram, YouTube, Pinterest, and TikTok posts through Postifys.",
+  "version": "0.5.0",
+  "description": "n8n community node for publishing Facebook, Instagram, YouTube, Pinterest, LinkedIn, and TikTok posts through Postifys.",
   "keywords": [
     "n8n-community-node-package",
     "n8n",
@@ -10,6 +10,7 @@
     "instagram",
     "youtube",
     "pinterest",
+    "linkedin",
     "tiktok",
     "social media"
   ],

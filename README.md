@@ -1,6 +1,6 @@
 # n8n-nodes-postifys
 
-Publish Facebook, Instagram, YouTube, Pinterest, and TikTok posts from n8n through [Postifys](https://postifys.com).
+Publish Facebook, Instagram, YouTube, Pinterest, LinkedIn, and TikTok posts from n8n through [Postifys](https://postifys.com).
 
 **API documentation:** https://postifys.com/api-docs
 
@@ -15,6 +15,7 @@ Publish Facebook, Instagram, YouTube, Pinterest, and TikTok posts from n8n throu
 - Publish Instagram videos/Reels
 - Upload YouTube videos
 - Publish Pinterest image pins
+- Publish LinkedIn member posts
 - Publish TikTok videos
 
 ## Prerequisites
@@ -24,7 +25,8 @@ Publish Facebook, Instagram, YouTube, Pinterest, and TikTok posts from n8n throu
 3. Connect your Facebook Pages and Instagram professional accounts in Postifys
 4. Connect your YouTube channel in Postifys if you want to upload YouTube videos
 5. Connect your Pinterest account(s) in Postifys if you want to publish pins
-6. Read the full REST API reference at https://postifys.com/api-docs
+6. Connect your LinkedIn account(s) in Postifys if you want to publish LinkedIn member posts
+7. Read the full REST API reference at https://postifys.com/api-docs
 
 ## Credentials
 
@@ -134,6 +136,22 @@ The node calls:
 
 ```http
 POST /api/pinterest/post
+```
+
+### LinkedIn
+
+- Resource: `Post`
+- Operation: `Create`
+- Platform: `LinkedIn`
+- LinkedIn Account: select a connected LinkedIn member account
+- Text: required post text
+- Title: optional link title
+- Link: optional URL for a LinkedIn link preview
+
+The node calls:
+
+```http
+POST /api/linkedin/post
 ```
 
 If you connect multiple Pinterest accounts in Postifys, choose the account first so the board dropdown loads boards for that account.
