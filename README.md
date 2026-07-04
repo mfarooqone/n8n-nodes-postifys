@@ -99,6 +99,7 @@ Google Drive links such as `https://drive.google.com/uc?export=download&id=FILE_
 - Title: video title
 - Description: video description
 - Video URL: public downloadable video URL
+- Thumbnail URL: optional public image URL for a custom thumbnail
 - Privacy Status: `Private`, `Unlisted`, or `Public`
 - Tags: comma-separated list
 - Category ID: default `22`

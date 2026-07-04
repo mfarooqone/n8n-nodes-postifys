@@ -343,6 +343,21 @@ export class Postifys implements INodeType {
 				description: 'Public video URL.',
 			},
 			{
+				displayName: 'Thumbnail URL',
+				name: 'thumbnailUrl',
+				type: 'string',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['youtube'],
+					},
+				},
+				default: '',
+				placeholder: 'https://example.com/thumbnail.jpg',
+				description: 'Optional public image URL for the YouTube custom thumbnail. If empty, YouTube uses an auto-generated frame.',
+			},
+			{
 				displayName: 'Privacy Status',
 				name: 'privacyStatus',
 				type: 'options',
@@ -568,6 +583,7 @@ export class Postifys implements INodeType {
 					const title = this.getNodeParameter('title', i, '') as string;
 					const description = this.getNodeParameter('description', i, '') as string;
 					const videoUrl = this.getNodeParameter('videoUrl', i, '') as string;
+					const thumbnailUrl = this.getNodeParameter('thumbnailUrl', i, '') as string;
 					const privacyStatus = this.getNodeParameter('privacyStatus', i, 'private') as string;
 					const tags = this.getNodeParameter('tags', i, '') as string;
 					const categoryId = this.getNodeParameter('categoryId', i, '22') as string;
@@ -589,6 +605,7 @@ export class Postifys implements INodeType {
 						title,
 						description,
 						videoUrl,
+						thumbnailUrl,
 						privacyStatus,
 						tags,
 						categoryId,
