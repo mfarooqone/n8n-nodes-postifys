@@ -282,6 +282,38 @@ export class Postifys implements INodeType {
 				description: 'Connected LinkedIn member account to publish to.',
 			},
 			{
+				displayName: 'LinkedIn Post Type',
+				name: 'linkedinPostType',
+				type: 'options',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['linkedin'],
+					},
+				},
+				options: [
+					{
+						name: 'Text',
+						value: 'text',
+					},
+					{
+						name: 'Image',
+						value: 'image',
+					},
+					{
+						name: 'Video',
+						value: 'video',
+					},
+					{
+						name: 'Link Preview',
+						value: 'link',
+					},
+				],
+				default: 'image',
+				description: 'Choose Image or Video to upload native LinkedIn media. Link Preview renders a URL card.',
+			},
+			{
 				displayName: 'Media Type',
 				name: 'mediaType',
 				type: 'options',
@@ -379,12 +411,28 @@ export class Postifys implements INodeType {
 					show: {
 						resource: ['post'],
 						operation: ['create'],
-						platform: ['pinterest', 'linkedin'],
+						platform: ['pinterest'],
 					},
 				},
 				default: '',
 				placeholder: 'https://example.com',
-				description: 'Optional destination URL for the Pinterest pin or LinkedIn link preview.',
+				description: 'Optional destination URL for the Pinterest pin.',
+			},
+			{
+				displayName: 'Link',
+				name: 'linkedinLink',
+				type: 'string',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['linkedin'],
+						linkedinPostType: ['link'],
+					},
+				},
+				default: '',
+				placeholder: 'https://example.com',
+				description: 'URL for a LinkedIn link preview card.',
 			},
 			{
 				displayName: 'Media URLs',
@@ -412,12 +460,28 @@ export class Postifys implements INodeType {
 					show: {
 						resource: ['post'],
 						operation: ['create'],
-						platform: ['pinterest', 'linkedin'],
+						platform: ['pinterest'],
 					},
 				},
 				default: '',
 				placeholder: 'https://example.com/pin-image.jpg',
-				description: 'Public image URL for the Pinterest pin or LinkedIn image post.',
+				description: 'Public image URL for the Pinterest pin.',
+			},
+			{
+				displayName: 'Image URL',
+				name: 'linkedinImageUrl',
+				type: 'string',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['linkedin'],
+						linkedinPostType: ['image'],
+					},
+				},
+				default: '',
+				placeholder: 'https://example.com/image.jpg',
+				description: 'Public image URL to upload as a native LinkedIn image post.',
 			},
 			{
 				displayName: 'Video URL',
@@ -433,6 +497,22 @@ export class Postifys implements INodeType {
 				default: '',
 				placeholder: 'https://example.com/video.mp4',
 				description: 'Public video URL.',
+			},
+			{
+				displayName: 'Video URL',
+				name: 'linkedinVideoUrl',
+				type: 'string',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['linkedin'],
+						linkedinPostType: ['video'],
+					},
+				},
+				default: '',
+				placeholder: 'https://example.com/video.mp4',
+				description: 'Public video URL to upload as a native LinkedIn video post.',
 			},
 			{
 				displayName: 'Thumbnail URL',
@@ -812,10 +892,12 @@ export class Postifys implements INodeType {
 					};
 				} else if (platform === 'linkedin') {
 					const linkedinUserId = this.getNodeParameter('linkedinUserId', i) as string;
+					const linkedinPostType = this.getNodeParameter('linkedinPostType', i, 'image') as string;
 					const text = this.getNodeParameter('text', i, '') as string;
 					const title = this.getNodeParameter('title', i, '') as string;
-					const link = this.getNodeParameter('link', i, '') as string;
-					const imageUrl = this.getNodeParameter('imageUrl', i, '') as string;
+					const link = this.getNodeParameter('linkedinLink', i, '') as string;
+					const imageUrl = this.getNodeParameter('linkedinImageUrl', i, '') as string;
+					const videoUrl = this.getNodeParameter('linkedinVideoUrl', i, '') as string;
 
 					assertAccountId(this.getNode(), i, linkedinUserId, 'LinkedIn Account');
 
@@ -823,13 +905,27 @@ export class Postifys implements INodeType {
 						throw new NodeOperationError(this.getNode(), 'LinkedIn posts require Text.', { itemIndex: i });
 					}
 
+					if (linkedinPostType === 'image' && !String(imageUrl || '').trim()) {
+						throw new NodeOperationError(this.getNode(), 'LinkedIn image posts require Image URL.', { itemIndex: i });
+					}
+
+					if (linkedinPostType === 'video' && !String(videoUrl || '').trim()) {
+						throw new NodeOperationError(this.getNode(), 'LinkedIn video posts require Video URL.', { itemIndex: i });
+					}
+
+					if (linkedinPostType === 'link' && !String(link || '').trim()) {
+						throw new NodeOperationError(this.getNode(), 'LinkedIn link preview posts require Link.', { itemIndex: i });
+					}
+
 					endpoint = '/api/linkedin/post';
 					body = {
 						linkedinUserId,
+						postType: linkedinPostType,
 						text,
 						title,
 						link,
 						imageUrl,
+						videoUrl,
 					};
 				} else if (platform === 'tiktok') {
 					const videoUrl = this.getNodeParameter('videoUrl', i, '') as string;

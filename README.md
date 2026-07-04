@@ -144,10 +144,12 @@ POST /api/pinterest/post
 - Operation: `Create`
 - Platform: `LinkedIn`
 - LinkedIn Account: select a connected LinkedIn member account
+- LinkedIn Post Type: `Text`, `Image`, `Video`, or `Link Preview`
 - Text: required post text
-- Image URL: optional public image URL for a real LinkedIn image post
+- Image URL: required for image posts
+- Video URL: required for video posts
 - Title: optional image or link title
-- Link: optional URL for a LinkedIn link preview
+- Link: required for link preview posts
 
 The node calls:
 
