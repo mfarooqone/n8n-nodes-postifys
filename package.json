@@ -1,13 +1,15 @@
 {
   "name": "n8n-nodes-postifys",
-  "version": "0.2.6",
-  "description": "n8n community node for publishing Facebook and Instagram posts through Postifys.",
+  "version": "0.3.0",
+  "description": "n8n community node for publishing Facebook, Instagram, YouTube, and TikTok posts through Postifys.",
   "keywords": [
     "n8n-community-node-package",
     "n8n",
     "postifys",
     "facebook",
     "instagram",
+    "youtube",
+    "tiktok",
     "social media"
   ],
   "license": "MIT",

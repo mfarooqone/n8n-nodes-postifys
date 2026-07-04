@@ -60,7 +60,7 @@ export class Postifys implements INodeType {
 		group: ['output'],
 		version: 1,
 		subtitle: '={{$parameter["platform"]}}',
-		description: 'Publish Facebook, Instagram, and TikTok posts through Postifys',
+	description: 'Publish Facebook, Instagram, YouTube, and TikTok posts through Postifys',
 		defaults: {
 			name: 'Postifys',
 		},
@@ -124,6 +124,10 @@ export class Postifys implements INodeType {
 					{
 						name: 'Instagram',
 						value: 'instagram',
+					},
+					{
+						name: 'YouTube',
+						value: 'youtube',
 					},
 					{
 						name: 'TikTok',
@@ -256,6 +260,38 @@ export class Postifys implements INodeType {
 				description: 'TikTok video caption.',
 			},
 			{
+				displayName: 'Title',
+				name: 'title',
+				type: 'string',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['youtube'],
+					},
+				},
+				default: '',
+				required: true,
+				description: 'YouTube video title.',
+			},
+			{
+				displayName: 'Description',
+				name: 'description',
+				type: 'string',
+				typeOptions: {
+					rows: 4,
+				},
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['youtube'],
+					},
+				},
+				default: '',
+				description: 'YouTube video description.',
+			},
+			{
 				displayName: 'Media URLs',
 				name: 'mediaUrls',
 				type: 'string',
@@ -281,12 +317,83 @@ export class Postifys implements INodeType {
 					show: {
 						resource: ['post'],
 						operation: ['create'],
-						platform: ['tiktok'],
+						platform: ['youtube', 'tiktok'],
 					},
 				},
 				default: '',
 				placeholder: 'https://example.com/video.mp4',
-				description: 'Public TikTok video URL.',
+				description: 'Public video URL.',
+			},
+			{
+				displayName: 'Privacy Status',
+				name: 'privacyStatus',
+				type: 'options',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['youtube'],
+					},
+				},
+				options: [
+					{
+						name: 'Private',
+						value: 'private',
+					},
+					{
+						name: 'Unlisted',
+						value: 'unlisted',
+					},
+					{
+						name: 'Public',
+						value: 'public',
+					},
+				],
+				default: 'private',
+				description: 'Visibility for the uploaded YouTube video.',
+			},
+			{
+				displayName: 'Tags',
+				name: 'tags',
+				type: 'string',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['youtube'],
+					},
+				},
+				default: '',
+				placeholder: 'postifys, automation',
+				description: 'Comma-separated YouTube tags.',
+			},
+			{
+				displayName: 'Category ID',
+				name: 'categoryId',
+				type: 'string',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['youtube'],
+					},
+				},
+				default: '22',
+				description: 'YouTube video category ID. 22 is People & Blogs.',
+			},
+			{
+				displayName: 'Notify Subscribers',
+				name: 'notifySubscribers',
+				type: 'boolean',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['youtube'],
+					},
+				},
+				default: false,
+				description: 'Whether YouTube should notify channel subscribers.',
 			},
 			{
 				displayName: 'Proxy Download',
@@ -297,7 +404,7 @@ export class Postifys implements INodeType {
 					show: {
 						resource: ['post'],
 						operation: ['create'],
-						platform: ['facebook', 'instagram'],
+						platform: ['facebook', 'instagram', 'youtube'],
 					},
 				},
 				description: 'Let Postifys download the media to a temporary file, publish it, then delete the temp file. Automatically enabled for Google Drive and Dropbox URLs.',
@@ -414,6 +521,34 @@ export class Postifys implements INodeType {
 						text,
 						mediaUrls,
 						proxyDownload,
+					};
+				} else if (platform === 'youtube') {
+					const title = this.getNodeParameter('title', i, '') as string;
+					const description = this.getNodeParameter('description', i, '') as string;
+					const videoUrl = this.getNodeParameter('videoUrl', i, '') as string;
+					const privacyStatus = this.getNodeParameter('privacyStatus', i, 'private') as string;
+					const tags = this.getNodeParameter('tags', i, '') as string;
+					const categoryId = this.getNodeParameter('categoryId', i, '22') as string;
+					const notifySubscribers = this.getNodeParameter('notifySubscribers', i, false) as boolean;
+
+					if (!String(title || '').trim()) {
+						throw new NodeOperationError(this.getNode(), 'YouTube posts require a Title.', { itemIndex: i });
+					}
+
+					if (!String(videoUrl || '').trim()) {
+						throw new NodeOperationError(this.getNode(), 'YouTube posts require a Video URL.', { itemIndex: i });
+					}
+
+					endpoint = '/api/youtube/post';
+					body = {
+						title,
+						description,
+						videoUrl,
+						privacyStatus,
+						tags,
+						categoryId,
+						notifySubscribers,
+						proxyDownload: true,
 					};
 				} else if (platform === 'tiktok') {
 					const videoUrl = this.getNodeParameter('videoUrl', i, '') as string;

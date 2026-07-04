@@ -1,6 +1,6 @@
 # n8n-nodes-postifys
 
-Publish Facebook and Instagram posts from n8n through [Postifys](https://postifys.com).
+Publish Facebook, Instagram, YouTube, and TikTok posts from n8n through [Postifys](https://postifys.com).
 
 ## Features
 
@@ -11,6 +11,8 @@ Publish Facebook and Instagram posts from n8n through [Postifys](https://postify
 - Publish Facebook Page Reels
 - Publish Instagram images
 - Publish Instagram videos/Reels
+- Upload YouTube videos
+- Publish TikTok videos
 
 ## Prerequisites
 
@@ -18,6 +20,7 @@ Publish Facebook and Instagram posts from n8n through [Postifys](https://postify
 2. Open `https://postifys.com/settings`.
 3. Create an API key.
 4. Connect your Facebook Pages and Instagram professional accounts in Postifys.
+5. Connect your YouTube channel in Postifys if you want to upload YouTube videos.
 
 ## Credentials
 
@@ -86,6 +89,27 @@ For Google Drive, Dropbox, or other links that Meta cannot fetch directly, enabl
 3. Delete the temporary file
 
 Google Drive links such as `https://drive.google.com/uc?export=download&id=FILE_ID` automatically enable proxy mode. The file must be shared as **Anyone with the link**.
+
+### YouTube
+
+- Resource: `Post`
+- Operation: `Create`
+- Platform: `YouTube`
+- Title: video title
+- Description: video description
+- Video URL: public downloadable video URL
+- Privacy Status: `Private`, `Unlisted`, or `Public`
+- Tags: comma-separated list
+- Category ID: default `22`
+- Notify Subscribers: optional
+
+The node calls:
+
+```http
+POST /api/youtube/post
+```
+
+Postifys downloads the video to temporary storage, uploads it to the connected YouTube channel, records publish history, then deletes the temp file.
 
 ## Install in n8n
 
