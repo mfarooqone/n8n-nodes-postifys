@@ -52,6 +52,18 @@ const assertAccountId = (
 	}
 };
 
+const getConnections = async (context: ILoadOptionsFunctions): Promise<any[]> => {
+	const credentials = await context.getCredentials('postifysApi') as PostifysCredentials;
+	const baseURL = String(credentials.serverUrl || '').replace(/\/$/, '');
+	const response = await context.helpers.requestWithAuthentication.call(context, 'postifysApi', {
+		method: 'GET',
+		baseURL,
+		uri: '/api/connections',
+		json: true,
+	});
+	return Array.isArray(response.connections) ? response.connections : [];
+};
+
 export class Postifys implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Postifys',
@@ -620,15 +632,8 @@ export class Postifys implements INodeType {
 	methods = {
 		loadOptions: {
 			async getFacebookPages(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				const credentials = await this.getCredentials('postifysApi') as PostifysCredentials;
-				const baseURL = String(credentials.serverUrl || '').replace(/\/$/, '');
-				const response = await this.helpers.requestWithAuthentication.call(this, 'postifysApi', {
-					method: 'GET',
-					baseURL,
-					uri: '/api/meta/pages',
-					json: true,
-				});
-				const pages = Array.isArray(response.pages) ? response.pages : [];
+				const connections = await getConnections(this);
+				const pages = connections.filter((c) => c.platform === 'facebook');
 				if (!pages.length) {
 					return [{
 						name: 'No Facebook Pages found. Reconnect Meta in Postifys.',
@@ -643,38 +648,24 @@ export class Postifys implements INodeType {
 			},
 
 			async getInstagramAccounts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				const credentials = await this.getCredentials('postifysApi') as PostifysCredentials;
-				const baseURL = String(credentials.serverUrl || '').replace(/\/$/, '');
-				const response = await this.helpers.requestWithAuthentication.call(this, 'postifysApi', {
-					method: 'GET',
-					baseURL,
-					uri: '/api/meta/instagram-accounts',
-					json: true,
-				});
-				const accounts = Array.isArray(response.instagramAccounts) ? response.instagramAccounts : [];
-				if (!accounts.length) {
+				const connections = await getConnections(this);
+				const instagrams = connections.filter((c) => c.platform === 'instagram');
+				if (!instagrams.length) {
 					return [{
 						name: 'No Instagram accounts found. Reconnect Meta in Postifys.',
 						value: '',
 						description: 'Open Postifys, connect Instagram/Facebook again, then reload this dropdown.',
 					}];
 				}
-				return accounts.map((account: { id: string; username?: string; name?: string }) => ({
-					name: account.username ? `@${account.username}` : account.name || account.id,
-					value: account.id,
+				return instagrams.map((instagram: { id: string; username?: string; name?: string }) => ({
+					name: instagram.username ? `@${instagram.username}` : instagram.name || instagram.id,
+					value: instagram.id,
 				}));
 			},
 
 			async getYouTubeChannels(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				const credentials = await this.getCredentials('postifysApi') as PostifysCredentials;
-				const baseURL = String(credentials.serverUrl || '').replace(/\/$/, '');
-				const response = await this.helpers.requestWithAuthentication.call(this, 'postifysApi', {
-					method: 'GET',
-					baseURL,
-					uri: '/api/youtube/channels',
-					json: true,
-				});
-				const channels = Array.isArray(response.channels) ? response.channels : [];
+				const connections = await getConnections(this);
+				const channels = connections.filter((c) => c.platform === 'youtube');
 				if (!channels.length) {
 					return [{
 						name: 'No YouTube channels found. Connect YouTube in Postifys.',
@@ -689,15 +680,8 @@ export class Postifys implements INodeType {
 			},
 
 			async getPinterestAccounts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				const credentials = await this.getCredentials('postifysApi') as PostifysCredentials;
-				const baseURL = String(credentials.serverUrl || '').replace(/\/$/, '');
-				const response = await this.helpers.requestWithAuthentication.call(this, 'postifysApi', {
-					method: 'GET',
-					baseURL,
-					uri: '/api/pinterest/accounts',
-					json: true,
-				});
-				const accounts = Array.isArray(response.accounts) ? response.accounts : [];
+				const connections = await getConnections(this);
+				const accounts = connections.filter((c) => c.platform === 'pinterest');
 				if (!accounts.length) {
 					return [{
 						name: 'No Pinterest accounts found. Connect Pinterest in Postifys.',
@@ -739,15 +723,8 @@ export class Postifys implements INodeType {
 			},
 
 			async getLinkedInAccounts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				const credentials = await this.getCredentials('postifysApi') as PostifysCredentials;
-				const baseURL = String(credentials.serverUrl || '').replace(/\/$/, '');
-				const response = await this.helpers.requestWithAuthentication.call(this, 'postifysApi', {
-					method: 'GET',
-					baseURL,
-					uri: '/api/linkedin/accounts',
-					json: true,
-				});
-				const accounts = Array.isArray(response.accounts) ? response.accounts : [];
+				const connections = await getConnections(this);
+				const accounts = connections.filter((c) => c.platform === 'linkedin');
 				if (!accounts.length) {
 					return [{
 						name: 'No LinkedIn accounts found. Connect LinkedIn in Postifys.',
