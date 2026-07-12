@@ -14,7 +14,6 @@ type PostifysCredentials = {
 	serverUrl: string;
 	apiKey: string;
 	mediaHostUrl?: string;
-	mediaApiKey?: string;
 };
 
 const normalizeMediaUrls = (value: string) => String(value || '')
@@ -37,18 +36,6 @@ const shouldAutoProxyDownload = (mediaUrls: string, platform: string, mediaType?
 };
 
 const mediaHostUrl = (credentials: PostifysCredentials) => String(credentials.mediaHostUrl || 'https://rednote.postifys.com').replace(/\/$/, '');
-
-const requireMediaApiKey = (credentials: PostifysCredentials, node: INode, itemIndex: number) => {
-	const mediaApiKey = String(credentials.mediaApiKey || '').trim();
-	if (!mediaApiKey) {
-		throw new NodeOperationError(
-			node,
-			'Media API Key is required for Media operations. Add it to the Postifys API credential (from rednote.postifys.com TEMP_MEDIA_API_KEY or dashboard secret hash).',
-			{ itemIndex },
-		);
-	}
-	return mediaApiKey;
-};
 
 const parsePostifysError = (error: unknown) => {
 	const apiError = error as {
@@ -848,7 +835,6 @@ export class Postifys implements INodeType {
 				if (resource === 'media') {
 					const operation = this.getNodeParameter('operation', i) as string;
 					const host = mediaHostUrl(credentials);
-					const mediaApiKey = requireMediaApiKey(credentials, this.getNode(), i);
 
 					if (operation === 'uploadFromUrl') {
 						const sourceUrl = String(this.getNodeParameter('sourceUrl', i, '') || '').trim();
@@ -862,7 +848,6 @@ export class Postifys implements INodeType {
 							url: `${host}/api/temp-media/from-url`,
 							headers: {
 								'Content-Type': 'application/json',
-								'X-Temp-Media-Key': mediaApiKey,
 							},
 							body: {
 								url: sourceUrl,
@@ -890,9 +875,6 @@ export class Postifys implements INodeType {
 						const responseData = await this.helpers.request({
 							method: 'DELETE',
 							url: `${host}/api/temp-media/${encodeURIComponent(mediaToken)}`,
-							headers: {
-								'X-Temp-Media-Key': mediaApiKey,
-							},
 							json: true,
 						}) as Record<string, unknown>;
 

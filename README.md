@@ -39,7 +39,6 @@ Create a new **Postifys API** credential in n8n.
 | API Key | Your key from Postifys Settings |
 | Postifys Server | `https://postifys.com` |
 | Media Host URL | `https://rednote.postifys.com` (for Upload from URL) |
-| Media API Key | `X-Temp-Media-Key` from your media host (see host admin) |
 
 The credential test calls:
 

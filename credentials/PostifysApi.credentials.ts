@@ -37,16 +37,6 @@ export class PostifysApi implements ICredentialType {
 			default: 'https://rednote.postifys.com',
 			description: 'Base URL used by Media → Upload from URL (temp direct media hosting).',
 		},
-		{
-			displayName: 'Media API Key',
-			name: 'mediaApiKey',
-			type: 'string',
-			typeOptions: {
-				password: true,
-			},
-			default: '',
-			description: 'X-Temp-Media-Key for the Media Host. Set TEMP_MEDIA_API_KEY on the host, or use the hash derived from DASHBOARD_SECRET_KEY.',
-		},
 	];
 
 	authenticate = {
