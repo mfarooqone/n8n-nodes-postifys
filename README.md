@@ -8,8 +8,7 @@ Publish Facebook, Instagram, YouTube, Pinterest, LinkedIn, and TikTok posts from
 
 - Credential type for your Postifys API key
 - Credential test using your Postifys server
-- **Media → Upload from URL** — re-host Google Drive links as direct `video/mp4` URLs (bypasses virus-scan pages)
-- **Media → Delete Uploaded Media** — cleanup after posting
+- **Media → Upload from URL** — re-host Google Drive links as direct `video/mp4` URLs (auto-deletes after 15 minutes)
 - Dynamic dropdowns for connected Facebook Pages and Instagram accounts
 - Publish Facebook Page images
 - Publish Facebook Page Reels
@@ -49,12 +48,13 @@ Authorization: Bearer YOUR_API_KEY
 
 ## Recommended workflow (Instagram / Facebook with Google Drive)
 
-Use **three Postifys nodes** in sequence:
+Use **two Postifys nodes** in sequence:
 
 1. **Postifys** — Resource: `Media`, Operation: `Upload from URL`, Source URL: your Drive link  
-   → outputs `serve_url`, `token`, `delete_path`
+   → outputs `serve_url` (auto-deletes from the host after 15 minutes)
 2. **Postifys** — Resource: `Post`, Platform: `Instagram` (or Facebook), Media URLs: `={{ $json.serve_url }}`, Proxy Download: **OFF**
-3. **Postifys** — Resource: `Media`, Operation: `Delete Uploaded Media`, Media Token: `={{ $json.token }}`
+
+No delete node is needed — the media host removes uploads automatically after 15 minutes.
 
 Do **not** pass raw `drive.google.com` links to Instagram — Meta receives an HTML virus-scan page instead of video.
 

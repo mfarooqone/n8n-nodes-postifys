@@ -143,14 +143,8 @@ export class Postifys implements INodeType {
 					{
 						name: 'Upload from URL',
 						value: 'uploadFromUrl',
-						description: 'Download Google Drive or other URLs to a direct MP4/image link (bypasses virus-scan pages)',
+						description: 'Download Google Drive or other URLs to a direct MP4/image link. Auto-deletes after 15 minutes.',
 						action: 'Upload media from URL',
-					},
-					{
-						name: 'Delete Uploaded Media',
-						value: 'deleteUploaded',
-						description: 'Delete a previously uploaded temp file after posting',
-						action: 'Delete uploaded media',
 					},
 				],
 				default: 'uploadFromUrl',
@@ -183,21 +177,6 @@ export class Postifys implements INodeType {
 				default: '',
 				placeholder: 'video.mp4',
 				description: 'Optional filename hint when the source URL does not include one',
-			},
-			{
-				displayName: 'Media Token',
-				name: 'mediaToken',
-				type: 'string',
-				displayOptions: {
-					show: {
-						resource: ['media'],
-						operation: ['deleteUploaded'],
-					},
-				},
-				default: '',
-				placeholder: '={{ $json.token }}',
-				description: 'Token from Upload from URL (or the last segment of delete_path)',
-				required: true,
 			},
 			{
 				displayName: 'Platform',
@@ -859,29 +838,6 @@ export class Postifys implements INodeType {
 						returnData.push({
 							json: {
 								success: true,
-								...responseData,
-							},
-							pairedItem: { item: i },
-						});
-						continue;
-					}
-
-					if (operation === 'deleteUploaded') {
-						const mediaToken = String(this.getNodeParameter('mediaToken', i, '') || '').trim();
-						if (!mediaToken) {
-							throw new NodeOperationError(this.getNode(), 'Media Token is required.', { itemIndex: i });
-						}
-
-						const responseData = await this.helpers.request({
-							method: 'DELETE',
-							url: `${host}/api/temp-media/${encodeURIComponent(mediaToken)}`,
-							json: true,
-						}) as Record<string, unknown>;
-
-						returnData.push({
-							json: {
-								success: true,
-								deleted: mediaToken,
 								...responseData,
 							},
 							pairedItem: { item: i },
