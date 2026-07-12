@@ -46,17 +46,15 @@ GET /api/key/test
 Authorization: Bearer YOUR_API_KEY
 ```
 
-## Recommended workflow (Instagram / Facebook with Google Drive)
+## Recommended workflow
 
-Use **two Postifys nodes** in sequence:
+Use **two Postifys nodes** in sequence for any platform that needs media from Google Drive or Dropbox:
 
 1. **Postifys** — Resource: `Media`, Operation: `Upload from URL`, Source URL: your Drive link  
    → outputs `serve_url` (auto-deletes from the host after 15 minutes)
-2. **Postifys** — Resource: `Post`, Platform: `Instagram` (or Facebook), Media URLs: `={{ $json.serve_url }}`, Proxy Download: **OFF**
+2. **Postifys** — Resource: `Post`, pick your platform, set Media/Video/Image URL to `={{ $json.serve_url }}`
 
-No delete node is needed — the media host removes uploads automatically after 15 minutes.
-
-Do **not** pass raw `drive.google.com` links to Instagram — Meta receives an HTML virus-scan page instead of video.
+Do **not** pass raw `drive.google.com` or Dropbox links to post nodes — the node will reject them and ask you to upload first.
 
 ## Node Usage
 
@@ -70,13 +68,7 @@ Add the **Postifys** node.
 - Facebook Page: select a connected Page
 - Media Type: `Image` or `Video / Reel`
 - Text: post text
-- Media URLs: optional URL list, one per line or comma-separated
-
-Facebook media publishes natively:
-
-- `Image` uses the Facebook Page photos API
-- `Video / Reel` uses the Facebook Reels API
-- Text-only Facebook posts are sent as feed posts
+- Media URLs: `={{ $json.serve_url }}` from the upload node
 
 The node calls:
 
@@ -92,19 +84,13 @@ POST /api/facebook/post
 - Instagram Account: select a connected Instagram professional account
 - Media Type: `Image` or `Video / Reel`
 - Text: caption text
-- Media URLs: public media URL list, one per line or comma-separated
+- Media URLs: `={{ $json.serve_url }}` from the upload node
 
 The node calls:
 
 ```http
 POST /api/instagram/post
 ```
-
-### Google Drive and proxy download
-
-**Recommended:** use **Media → Upload from URL** first, then pass `serve_url` to the post node.
-
-Legacy proxy mode still works for some hosts, but Google Drive virus-scan pages often break Instagram/Facebook posts. Upload from URL downloads the real file server-side and exposes a direct `/media/temp/...mp4` link.
 
 ### YouTube
 
@@ -114,7 +100,7 @@ Legacy proxy mode still works for some hosts, but Google Drive virus-scan pages 
 - YouTube Channel: select the connected channel
 - Title: video title
 - Description: video description
-- Video URL: public downloadable video URL
+- Video URL: `={{ $json.serve_url }}` from the upload node
 - Thumbnail URL: optional public image URL for a custom thumbnail
 - Privacy Status: `Private`, `Unlisted`, or `Public`
 - Tags: comma-separated list
@@ -127,8 +113,6 @@ The node calls:
 POST /api/youtube/post
 ```
 
-Postifys downloads the video to temporary storage, uploads it to the connected YouTube channel, records publish history, then deletes the temp file.
-
 ### Pinterest
 
 - Resource: `Post`
@@ -139,8 +123,7 @@ Postifys downloads the video to temporary storage, uploads it to the connected Y
 - Title: pin title
 - Description: optional pin description
 - Link: optional destination URL
-- Image URL: public image URL for the pin
-- Proxy Download: optional; auto-enabled for Google Drive and Dropbox links
+- Image URL: `={{ $json.serve_url }}` from the upload node
 
 The node calls:
 
@@ -156,8 +139,8 @@ POST /api/pinterest/post
 - LinkedIn Account: select a connected LinkedIn member account
 - LinkedIn Post Type: `Text`, `Image`, `Video`, or `Link Preview`
 - Text: required post text
-- Image URL: required for image posts
-- Video URL: required for video posts
+- Image URL: `={{ $json.serve_url }}` for image posts
+- Video URL: `={{ $json.serve_url }}` for video posts
 - Title: optional image or link title
 - Link: required for link preview posts
 

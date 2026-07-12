@@ -21,18 +21,23 @@ const normalizeMediaUrls = (value: string) => String(value || '')
 	.map((item) => item.trim())
 	.filter(Boolean);
 
-const isHostedMediaUrl = (value: string) => /\/media\/temp\//i.test(String(value || ''));
+const BLOCKED_DIRECT_URL_PATTERNS = /drive\.google\.com|dropbox\.com|dropboxusercontent\.com/i;
 
-const shouldAutoProxyDownload = (mediaUrls: string, platform: string, mediaType?: string) => {
-	const lowered = String(mediaUrls || '').toLowerCase();
-	if (isHostedMediaUrl(lowered)) {
-		return false;
+const assertDirectMediaUrls = (
+	node: INode,
+	itemIndex: number,
+	urls: string[],
+	label = 'Media URL',
+) => {
+	for (const url of urls) {
+		if (BLOCKED_DIRECT_URL_PATTERNS.test(url)) {
+			throw new NodeOperationError(
+				node,
+				`${label} cannot use Google Drive or Dropbox links. Add Media → Upload from URL first, then use serve_url.`,
+				{ itemIndex },
+			);
+		}
 	}
-	if (/(drive\.google\.com|dropbox\.com|dropboxusercontent\.com)/.test(lowered)) {
-		return true;
-	}
-
-	return ['facebook', 'instagram'].includes(platform) && (mediaType === 'REEL' || mediaType === 'VIDEO');
 };
 
 const mediaHostUrl = (credentials: PostifysCredentials) => String(credentials.mediaHostUrl || 'https://rednote.postifys.com').replace(/\/$/, '');
@@ -100,15 +105,15 @@ export class Postifys implements INodeType {
 				noDataExpression: true,
 				options: [
 					{
-						name: 'Post',
-						value: 'post',
-					},
-					{
 						name: 'Media',
 						value: 'media',
 					},
+					{
+						name: 'Post',
+						value: 'post',
+					},
 				],
-				default: 'post',
+				default: 'media',
 			},
 			{
 				displayName: 'Operation',
@@ -523,7 +528,7 @@ export class Postifys implements INodeType {
 				},
 				default: '',
 				placeholder: '={{ $json.serve_url }}',
-				description: 'Use serve_url from a Media → Upload from URL node. Do not pass raw Google Drive links here.',
+				description: 'Use serve_url from Media → Upload from URL. One URL per line or comma-separated.',
 			},
 			{
 				displayName: 'Image URL',
@@ -537,8 +542,8 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				placeholder: 'https://example.com/pin-image.jpg',
-				description: 'Public image URL for the Pinterest pin.',
+				placeholder: '={{ $json.serve_url }}',
+				description: 'Use serve_url from Media → Upload from URL.',
 			},
 			{
 				displayName: 'Image URL',
@@ -553,23 +558,8 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				placeholder: 'https://example.com/image.jpg',
-				description: 'Public image URL to upload as a native LinkedIn image post.',
-			},
-			{
-				displayName: 'Video URL',
-				name: 'videoUrl',
-				type: 'string',
-				displayOptions: {
-					show: {
-						resource: ['post'],
-						operation: ['create'],
-						platform: ['youtube', 'tiktok'],
-					},
-				},
-				default: '',
-				placeholder: 'https://example.com/video.mp4',
-				description: 'Public video URL.',
+				placeholder: '={{ $json.serve_url }}',
+				description: 'Use serve_url from Media → Upload from URL.',
 			},
 			{
 				displayName: 'Video URL',
@@ -584,8 +574,23 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				placeholder: 'https://example.com/video.mp4',
-				description: 'Public video URL to upload as a native LinkedIn video post.',
+				placeholder: '={{ $json.serve_url }}',
+				description: 'Use serve_url from Media → Upload from URL.',
+			},
+			{
+				displayName: 'Video URL',
+				name: 'videoUrl',
+				type: 'string',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['youtube', 'tiktok'],
+					},
+				},
+				default: '',
+				placeholder: '={{ $json.serve_url }}',
+				description: 'Use serve_url from Media → Upload from URL.',
 			},
 			{
 				displayName: 'Thumbnail URL',
@@ -672,20 +677,6 @@ export class Postifys implements INodeType {
 				},
 				default: false,
 				description: 'Whether YouTube should notify channel subscribers.',
-			},
-			{
-				displayName: 'Proxy Download',
-				name: 'proxyDownload',
-				type: 'boolean',
-				default: false,
-				displayOptions: {
-					show: {
-						resource: ['post'],
-						operation: ['create'],
-						platform: ['facebook', 'instagram', 'youtube', 'pinterest'],
-					},
-				},
-				description: 'Let Postifys download the media to a temporary file, publish it, then delete the temp file. Disabled automatically for hosted media URLs (/media/temp/). For Google Drive links, use Media → Upload from URL first.',
 			},
 		],
 	};
@@ -857,8 +848,7 @@ export class Postifys implements INodeType {
 					const facebookPostMode = this.getNodeParameter('facebookPostMode', i) as string;
 					const text = this.getNodeParameter('text', i, '') as string;
 					const mediaUrls = normalizeMediaUrls(this.getNodeParameter('mediaUrls', i, '') as string);
-					const proxyDownload = Boolean(this.getNodeParameter('proxyDownload', i, false))
-						|| shouldAutoProxyDownload(mediaUrls.join('\n'), platform, facebookPostMode);
+					assertDirectMediaUrls(this.getNode(), i, mediaUrls, 'Media URLs');
 
 					assertAccountId(this.getNode(), i, pageId, 'Facebook Page');
 
@@ -876,15 +866,13 @@ export class Postifys implements INodeType {
 						type: mediaUrls.length ? facebookPostMode : 'FEED',
 						text,
 						mediaUrls,
-						proxyDownload,
 					};
 				} else if (platform === 'instagram') {
 					const instagramAccountId = this.getNodeParameter('instagramAccountId', i) as string;
 					const mediaType = this.getNodeParameter('mediaType', i) as string;
 					const text = this.getNodeParameter('text', i, '') as string;
 					const mediaUrls = normalizeMediaUrls(this.getNodeParameter('mediaUrls', i, '') as string);
-					const proxyDownload = Boolean(this.getNodeParameter('proxyDownload', i, false))
-						|| shouldAutoProxyDownload(mediaUrls.join('\n'), platform, mediaType);
+					assertDirectMediaUrls(this.getNode(), i, mediaUrls, 'Media URLs');
 
 					assertAccountId(this.getNode(), i, instagramAccountId, 'Instagram account');
 
@@ -898,7 +886,6 @@ export class Postifys implements INodeType {
 						type: mediaType,
 						text,
 						mediaUrls,
-						proxyDownload,
 					};
 				} else if (platform === 'youtube') {
 					const channelId = this.getNodeParameter('channelId', i) as string;
@@ -921,6 +908,11 @@ export class Postifys implements INodeType {
 						throw new NodeOperationError(this.getNode(), 'YouTube posts require a Video URL.', { itemIndex: i });
 					}
 
+					assertDirectMediaUrls(this.getNode(), i, [String(videoUrl).trim()], 'Video URL');
+					if (String(thumbnailUrl || '').trim()) {
+						assertDirectMediaUrls(this.getNode(), i, [String(thumbnailUrl).trim()], 'Thumbnail URL');
+					}
+
 					endpoint = '/api/youtube/post';
 					body = {
 						channelId,
@@ -932,7 +924,6 @@ export class Postifys implements INodeType {
 						tags,
 						categoryId,
 						notifySubscribers,
-						proxyDownload: true,
 					};
 				} else if (platform === 'pinterest') {
 					const pinterestUserId = this.getNodeParameter('pinterestUserId', i) as string;
@@ -943,8 +934,7 @@ export class Postifys implements INodeType {
 					const imageUrl = this.getNodeParameter('imageUrl', i, '') as string;
 					const mediaUrls = normalizeMediaUrls(this.getNodeParameter('mediaUrls', i, '') as string);
 					const resolvedImageUrl = String(imageUrl || mediaUrls[0] || '').trim();
-					const proxyDownload = Boolean(this.getNodeParameter('proxyDownload', i, false))
-						|| shouldAutoProxyDownload(resolvedImageUrl, platform);
+					assertDirectMediaUrls(this.getNode(), i, [resolvedImageUrl], 'Image URL');
 
 					assertAccountId(this.getNode(), i, pinterestUserId, 'Pinterest Account');
 					assertAccountId(this.getNode(), i, boardId, 'Pinterest Board');
@@ -965,7 +955,6 @@ export class Postifys implements INodeType {
 						description,
 						link,
 						imageUrl: resolvedImageUrl,
-						proxyDownload,
 					};
 				} else if (platform === 'linkedin') {
 					const linkedinUserId = this.getNodeParameter('linkedinUserId', i) as string;
@@ -990,6 +979,13 @@ export class Postifys implements INodeType {
 						throw new NodeOperationError(this.getNode(), 'LinkedIn video posts require Video URL.', { itemIndex: i });
 					}
 
+					if (linkedinPostType === 'image') {
+						assertDirectMediaUrls(this.getNode(), i, [String(imageUrl).trim()], 'Image URL');
+					}
+					if (linkedinPostType === 'video') {
+						assertDirectMediaUrls(this.getNode(), i, [String(videoUrl).trim()], 'Video URL');
+					}
+
 					if (linkedinPostType === 'link' && !String(link || '').trim()) {
 						throw new NodeOperationError(this.getNode(), 'LinkedIn link preview posts require Link.', { itemIndex: i });
 					}
@@ -1011,6 +1007,8 @@ export class Postifys implements INodeType {
 					if (!String(videoUrl || '').trim()) {
 						throw new NodeOperationError(this.getNode(), 'TikTok posts require a Video URL.', { itemIndex: i });
 					}
+
+					assertDirectMediaUrls(this.getNode(), i, [String(videoUrl).trim()], 'Video URL');
 
 					endpoint = '/api/tiktok/post';
 					body = {
