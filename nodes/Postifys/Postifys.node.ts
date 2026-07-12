@@ -13,6 +13,8 @@ import { NodeApiError, NodeOperationError } from 'n8n-workflow';
 type PostifysCredentials = {
 	serverUrl: string;
 	apiKey: string;
+	mediaHostUrl?: string;
+	mediaApiKey?: string;
 };
 
 const normalizeMediaUrls = (value: string) => String(value || '')
@@ -20,13 +22,32 @@ const normalizeMediaUrls = (value: string) => String(value || '')
 	.map((item) => item.trim())
 	.filter(Boolean);
 
+const isHostedMediaUrl = (value: string) => /\/media\/temp\//i.test(String(value || ''));
+
 const shouldAutoProxyDownload = (mediaUrls: string, platform: string, mediaType?: string) => {
 	const lowered = String(mediaUrls || '').toLowerCase();
+	if (isHostedMediaUrl(lowered)) {
+		return false;
+	}
 	if (/(drive\.google\.com|dropbox\.com|dropboxusercontent\.com)/.test(lowered)) {
 		return true;
 	}
 
 	return ['facebook', 'instagram'].includes(platform) && (mediaType === 'REEL' || mediaType === 'VIDEO');
+};
+
+const mediaHostUrl = (credentials: PostifysCredentials) => String(credentials.mediaHostUrl || 'https://rednote.postifys.com').replace(/\/$/, '');
+
+const requireMediaApiKey = (credentials: PostifysCredentials, node: INode, itemIndex: number) => {
+	const mediaApiKey = String(credentials.mediaApiKey || '').trim();
+	if (!mediaApiKey) {
+		throw new NodeOperationError(
+			node,
+			'Media API Key is required for Media operations. Add it to the Postifys API credential (from rednote.postifys.com TEMP_MEDIA_API_KEY or dashboard secret hash).',
+			{ itemIndex },
+		);
+	}
+	return mediaApiKey;
 };
 
 const parsePostifysError = (error: unknown) => {
@@ -71,8 +92,8 @@ export class Postifys implements INodeType {
 		icon: 'file:postifys.svg',
 		group: ['output'],
 		version: 1,
-		subtitle: '={{$parameter["platform"]}}',
-	description: 'Publish Facebook, Instagram, YouTube, Pinterest, LinkedIn, and TikTok posts through Postifys',
+		subtitle: '={{$parameter["resource"] === "media" ? $parameter["operation"] : $parameter["platform"]}}',
+		description: 'Upload media to a direct URL, then publish Facebook, Instagram, YouTube, Pinterest, LinkedIn, and TikTok posts through Postifys',
 		defaults: {
 			name: 'Postifys',
 		},
@@ -95,6 +116,10 @@ export class Postifys implements INodeType {
 						name: 'Post',
 						value: 'post',
 					},
+					{
+						name: 'Media',
+						value: 'media',
+					},
 				],
 				default: 'post',
 			},
@@ -116,6 +141,76 @@ export class Postifys implements INodeType {
 					},
 				],
 				default: 'create',
+			},
+			{
+				displayName: 'Operation',
+				name: 'operation',
+				type: 'options',
+				noDataExpression: true,
+				displayOptions: {
+					show: {
+						resource: ['media'],
+					},
+				},
+				options: [
+					{
+						name: 'Upload from URL',
+						value: 'uploadFromUrl',
+						description: 'Download Google Drive or other URLs to a direct MP4/image link (bypasses virus-scan pages)',
+						action: 'Upload media from URL',
+					},
+					{
+						name: 'Delete Uploaded Media',
+						value: 'deleteUploaded',
+						description: 'Delete a previously uploaded temp file after posting',
+						action: 'Delete uploaded media',
+					},
+				],
+				default: 'uploadFromUrl',
+			},
+			{
+				displayName: 'Source URL',
+				name: 'sourceUrl',
+				type: 'string',
+				displayOptions: {
+					show: {
+						resource: ['media'],
+						operation: ['uploadFromUrl'],
+					},
+				},
+				default: '',
+				placeholder: 'https://drive.google.com/uc?export=download&id=FILE_ID',
+				description: 'Google Drive share/download link or any public media URL to re-host as a direct file',
+				required: true,
+			},
+			{
+				displayName: 'Filename',
+				name: 'uploadFilename',
+				type: 'string',
+				displayOptions: {
+					show: {
+						resource: ['media'],
+						operation: ['uploadFromUrl'],
+					},
+				},
+				default: '',
+				placeholder: 'video.mp4',
+				description: 'Optional filename hint when the source URL does not include one',
+			},
+			{
+				displayName: 'Media Token',
+				name: 'mediaToken',
+				type: 'string',
+				displayOptions: {
+					show: {
+						resource: ['media'],
+						operation: ['deleteUploaded'],
+					},
+				},
+				default: '',
+				placeholder: '={{ $json.token }}',
+				description: 'Token from Upload from URL (or the last segment of delete_path)',
+				required: true,
 			},
 			{
 				displayName: 'Platform',
@@ -461,8 +556,8 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				placeholder: 'https://example.com/image.jpg',
-				description: 'Public media URLs. Enter one per line or comma-separated. Postifys publishes the first URL.',
+				placeholder: '={{ $json.serve_url }}',
+				description: 'Use serve_url from a Media → Upload from URL node. Do not pass raw Google Drive links here.',
 			},
 			{
 				displayName: 'Image URL',
@@ -624,7 +719,7 @@ export class Postifys implements INodeType {
 						platform: ['facebook', 'instagram', 'youtube', 'pinterest'],
 					},
 				},
-				description: 'Let Postifys download the media to a temporary file, publish it, then delete the temp file. Automatically enabled for Google Drive and Dropbox URLs.',
+				description: 'Let Postifys download the media to a temporary file, publish it, then delete the temp file. Disabled automatically for hosted media URLs (/media/temp/). For Google Drive links, use Media → Upload from URL first.',
 			},
 		],
 	};
@@ -748,6 +843,73 @@ export class Postifys implements INodeType {
 
 		for (let i = 0; i < items.length; i++) {
 			try {
+				const resource = this.getNodeParameter('resource', i) as string;
+
+				if (resource === 'media') {
+					const operation = this.getNodeParameter('operation', i) as string;
+					const host = mediaHostUrl(credentials);
+					const mediaApiKey = requireMediaApiKey(credentials, this.getNode(), i);
+
+					if (operation === 'uploadFromUrl') {
+						const sourceUrl = String(this.getNodeParameter('sourceUrl', i, '') || '').trim();
+						const uploadFilename = String(this.getNodeParameter('uploadFilename', i, '') || '').trim();
+						if (!sourceUrl) {
+							throw new NodeOperationError(this.getNode(), 'Source URL is required.', { itemIndex: i });
+						}
+
+						const responseData = await this.helpers.request({
+							method: 'POST',
+							url: `${host}/api/temp-media/from-url`,
+							headers: {
+								'Content-Type': 'application/json',
+								'X-Temp-Media-Key': mediaApiKey,
+							},
+							body: {
+								url: sourceUrl,
+								...(uploadFilename ? { filename: uploadFilename } : {}),
+							},
+							json: true,
+						}) as Record<string, unknown>;
+
+						returnData.push({
+							json: {
+								success: true,
+								...responseData,
+							},
+							pairedItem: { item: i },
+						});
+						continue;
+					}
+
+					if (operation === 'deleteUploaded') {
+						const mediaToken = String(this.getNodeParameter('mediaToken', i, '') || '').trim();
+						if (!mediaToken) {
+							throw new NodeOperationError(this.getNode(), 'Media Token is required.', { itemIndex: i });
+						}
+
+						const responseData = await this.helpers.request({
+							method: 'DELETE',
+							url: `${host}/api/temp-media/${encodeURIComponent(mediaToken)}`,
+							headers: {
+								'X-Temp-Media-Key': mediaApiKey,
+							},
+							json: true,
+						}) as Record<string, unknown>;
+
+						returnData.push({
+							json: {
+								success: true,
+								deleted: mediaToken,
+								...responseData,
+							},
+							pairedItem: { item: i },
+						});
+						continue;
+					}
+
+					throw new NodeOperationError(this.getNode(), `Unsupported media operation: ${operation}`, { itemIndex: i });
+				}
+
 				const platform = this.getNodeParameter('platform', i) as string;
 				let endpoint = '';
 				let body: Record<string, unknown> = {};

@@ -8,6 +8,8 @@ Publish Facebook, Instagram, YouTube, Pinterest, LinkedIn, and TikTok posts from
 
 - Credential type for your Postifys API key
 - Credential test using your Postifys server
+- **Media → Upload from URL** — re-host Google Drive links as direct `video/mp4` URLs (bypasses virus-scan pages)
+- **Media → Delete Uploaded Media** — cleanup after posting
 - Dynamic dropdowns for connected Facebook Pages and Instagram accounts
 - Publish Facebook Page images
 - Publish Facebook Page Reels
@@ -36,6 +38,8 @@ Create a new **Postifys API** credential in n8n.
 |---|---|
 | API Key | Your key from Postifys Settings |
 | Postifys Server | `https://postifys.com` |
+| Media Host URL | `https://rednote.postifys.com` (for Upload from URL) |
+| Media API Key | `X-Temp-Media-Key` from your media host (see host admin) |
 
 The credential test calls:
 
@@ -43,6 +47,17 @@ The credential test calls:
 GET /api/key/test
 Authorization: Bearer YOUR_API_KEY
 ```
+
+## Recommended workflow (Instagram / Facebook with Google Drive)
+
+Use **three Postifys nodes** in sequence:
+
+1. **Postifys** — Resource: `Media`, Operation: `Upload from URL`, Source URL: your Drive link  
+   → outputs `serve_url`, `token`, `delete_path`
+2. **Postifys** — Resource: `Post`, Platform: `Instagram` (or Facebook), Media URLs: `={{ $json.serve_url }}`, Proxy Download: **OFF**
+3. **Postifys** — Resource: `Media`, Operation: `Delete Uploaded Media`, Media Token: `={{ $json.token }}`
+
+Do **not** pass raw `drive.google.com` links to Instagram — Meta receives an HTML virus-scan page instead of video.
 
 ## Node Usage
 
@@ -88,13 +103,9 @@ POST /api/instagram/post
 
 ### Google Drive and proxy download
 
-For Google Drive, Dropbox, or other links that Meta cannot fetch directly, enable **Proxy Download** or use a Google Drive URL directly. Postifys will:
+**Recommended:** use **Media → Upload from URL** first, then pass `serve_url` to the post node.
 
-1. Download the file to a temporary location on the server
-2. Publish the Reel or image to Facebook or Instagram
-3. Delete the temporary file
-
-Google Drive links such as `https://drive.google.com/uc?export=download&id=FILE_ID` automatically enable proxy mode. The file must be shared as **Anyone with the link**.
+Legacy proxy mode still works for some hosts, but Google Drive virus-scan pages often break Instagram/Facebook posts. Upload from URL downloads the real file server-side and exposes a direct `/media/temp/...mp4` link.
 
 ### YouTube
 
