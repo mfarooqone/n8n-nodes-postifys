@@ -42,6 +42,9 @@ const assertDirectMediaUrls = (
 
 const mediaHostUrl = (credentials: PostifysCredentials) => String(credentials.mediaHostUrl || 'https://rednote.postifys.com').replace(/\/$/, '');
 
+// Instagram Reels can take several minutes to process on Meta's side.
+const POST_REQUEST_TIMEOUT_MS = 20 * 60 * 1000;
+
 const parsePostifysError = (error: unknown) => {
 	const apiError = error as {
 		message?: string;
@@ -148,7 +151,7 @@ export class Postifys implements INodeType {
 					{
 						name: 'Upload from URL',
 						value: 'uploadFromUrl',
-						description: 'Download Google Drive or other URLs to a direct MP4/image link. Auto-deletes after 15 minutes.',
+						description: 'Download Google Drive or other URLs to a direct MP4/image link. Auto-deletes after 30 minutes.',
 						action: 'Upload media from URL',
 					},
 				],
@@ -1025,6 +1028,7 @@ export class Postifys implements INodeType {
 					uri: endpoint,
 					body,
 					json: true,
+					timeout: POST_REQUEST_TIMEOUT_MS,
 				};
 
 				const responseData = await this.helpers.requestWithAuthentication.call(

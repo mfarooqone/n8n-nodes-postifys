@@ -8,7 +8,7 @@ Publish Facebook, Instagram, YouTube, Pinterest, LinkedIn, and TikTok posts from
 
 - Credential type for your Postifys API key
 - Credential test using your Postifys server
-- **Media → Upload from URL** — re-host Google Drive links as direct `video/mp4` URLs (auto-deletes after 15 minutes)
+- **Media → Upload from URL** — re-host Google Drive links as direct `video/mp4` URLs (auto-deletes after 30 minutes)
 - Dynamic dropdowns for connected Facebook Pages and Instagram accounts
 - Publish Facebook Page images
 - Publish Facebook Page Reels
@@ -51,7 +51,7 @@ Authorization: Bearer YOUR_API_KEY
 Use **two Postifys nodes** in sequence for any platform that needs media from Google Drive or Dropbox:
 
 1. **Postifys** — Resource: `Media`, Operation: `Upload from URL`, Source URL: your Drive link  
-   → outputs `serve_url` (auto-deletes from the host after 15 minutes)
+   → outputs `serve_url` (auto-deletes from the host after 30 minutes)
 2. **Postifys** — Resource: `Post`, pick your platform, set Media/Video/Image URL to `={{ $json.serve_url }}`
 
 Do **not** pass raw `drive.google.com` or Dropbox links to post nodes — the node will reject them and ask you to upload first.
