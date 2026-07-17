@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-postifys",
-  "version": "0.6.4",
+  "version": "0.6.17",
   "description": "n8n community node for publishing Facebook, Instagram, YouTube, Pinterest, LinkedIn, and TikTok posts through Postifys.",
   "keywords": [
     "n8n-community-node-package",
@@ -26,6 +26,11 @@
   "main": "dist/nodes/Postifys/Postifys.node.js",
   "scripts": {
     "build": "tsc && mkdir -p dist/nodes/Postifys && cp nodes/Postifys/postifys.svg dist/nodes/Postifys/postifys.svg",
+    "typecheck": "tsc --noEmit",
+    "smoke": "npm run build && node scripts/smoke-test.js",
+    "test": "npm run smoke",
+    "lint": "npm run typecheck",
+    "release:check": "npm run test && npm pack --dry-run",
     "prepack": "npm run build"
   },
   "files": [

@@ -8,10 +8,17 @@ Publish Facebook, Instagram, YouTube, Pinterest, LinkedIn, and TikTok posts from
 
 - Credential type for your Postifys API key
 - Credential test using your Postifys server
-- **Media → Upload from URL** — re-host Google Drive links as direct `video/mp4` URLs (auto-deletes after 30 minutes)
-- Dynamic dropdowns for connected Facebook Pages and Instagram accounts
+- **Media → Upload** — upload any image or video URL to Postifys and return a hosted media URL
+- Dynamic dropdowns for connected Facebook Pages, Instagram accounts, YouTube channels, Pinterest accounts/boards, LinkedIn accounts, and TikTok accounts
+- Auto field mapping for common input fields such as `url`, `media_url`, `serve_url`, `drive_link`, `title`, and `caption`
+- Normalized post output with `status`, `stage`, `isComplete`, `shouldPoll`, `published`, `failed`, and `failureReason`
+- Long Instagram videos expose restart-safe carousel item and parent progress while Postifys prepares the ordered carousel post
+- `Post -> Get Status` operation for polling a configurable Postifys status endpoint
+- Posts default to **async**: the node returns a `postId` immediately and Postifys finishes publishing in the background (same pattern as Instagram Reels). Use Get Status if you need the final result.
+- Simple media output with only `name` and `serve_url`
 - Publish Facebook Page images
 - Publish Facebook Page Reels
+- Optional Reel collaborators: Instagram usernames (up to 3) or Facebook Page IDs (up to 10)
 - Publish Instagram images
 - Publish Instagram videos/Reels
 - Upload YouTube videos
@@ -37,7 +44,6 @@ Create a new **Postifys API** credential in n8n.
 |---|---|
 | API Key | Your key from Postifys Settings |
 | Postifys Server | `https://postifys.com` |
-| Media Host URL | `https://rednote.postifys.com` (for Upload from URL) |
 
 The credential test calls:
 
@@ -46,15 +52,34 @@ GET /api/key/test
 Authorization: Bearer YOUR_API_KEY
 ```
 
+The media upload operation uses **Postifys Server** and calls the Postifys media queue.
+
 ## Recommended workflow
 
-Use **two Postifys nodes** in sequence for any platform that needs media from Google Drive or Dropbox:
+Use **two Postifys nodes** in sequence when a platform needs a direct public media URL:
 
-1. **Postifys** — Resource: `Media`, Operation: `Upload from URL`, Source URL: your Drive link  
-   → outputs `serve_url` (auto-deletes from the host after 30 minutes)
+1. **Postifys** — Resource: `Media`, Operation: `Upload`, URL: your image/video URL
+   → queues the media on Postifys, waits until it is ready, and outputs `name` and `serve_url`
 2. **Postifys** — Resource: `Post`, pick your platform, set Media/Video/Image URL to `={{ $json.serve_url }}`
 
-Do **not** pass raw `drive.google.com` or Dropbox links to post nodes — the node will reject them and ask you to upload first.
+Do **not** pass raw `drive.google.com`, Dropbox, or `rednote.postifys.com/media/temp/...` links directly to post nodes. Upload them with **Media -> Upload** first, then use the returned Postifys `serve_url` (`https://postifys.com/media/tmp/...`).
+
+For batch workflows, leave **Auto Map Input Fields** enabled:
+
+- Media upload can read common fields such as `url`, `source_url`, `drive_link`, or `path`
+- Posting reads `url`, `media_url`, `serve_url`, and other common direct media fields
+- Blank captions/titles can fall back to `title` or `caption`
+- Rows without media can be skipped instead of failing the whole workflow
+
+### Status Polling
+
+Use **Resource: Post -> Operation: Get Status** after a create step if your Postifys server exposes a status endpoint. The default path is:
+
+```http
+GET /api/posts/status?postId=POST_ID&platform=instagram
+```
+
+You can change **Status Endpoint Path** to match the deployed Postifys API, for example a future `/api/history/status` route.
 
 ## Node Usage
 
@@ -85,6 +110,7 @@ POST /api/facebook/post
 - Media Type: `Image` or `Video / Reel`
 - Text: caption text
 - Media URLs: `={{ $json.serve_url }}` from the upload node
+- Post Asynchronously: enabled for videos/Reels to avoid long n8n request timeouts
 
 The node calls:
 
@@ -152,6 +178,64 @@ POST /api/linkedin/post
 
 If you connect multiple Pinterest accounts in Postifys, choose the account first so the board dropdown loads boards for that account.
 
+### TikTok
+
+1. Connect TikTok in Postifys first: open https://postifys.com/app → **Add Account → TikTok** (per-user OAuth).
+2. In n8n:
+   - Resource: `Post`
+   - Operation: `Create`
+   - Platform: `TikTok`
+   - TikTok Account: select the connected creator from the dropdown
+   - Caption: optional caption text
+   - Video URL: `={{ $json.serve_url }}` from the upload node
+   - TikTok Privacy: used for Direct Post (`video.publish`). Sandbox apps with `video.upload` send a **draft to the TikTok inbox**; the creator finishes posting in the TikTok app.
+
+The node calls:
+
+```http
+POST /api/tiktok/post
+```
+
+with `tiktokAccountId` (TikTok `open_id` from `/api/connections`).
+
+Success statuses:
+- `PUBLISH_COMPLETE` — direct feed publish (`video.publish`)
+- `SEND_TO_USER_INBOX` — draft delivered to creator inbox (`video.upload`)
+
+## Output Shape
+
+Post operations return normalized fields:
+
+```json
+{
+  "success": true,
+  "platform": "instagram",
+  "operation": "create",
+  "postId": "POST_OR_HISTORY_ID",
+  "status": "processing",
+  "stage": "processing_carousel_item",
+  "isComplete": false,
+  "shouldPoll": true,
+  "published": false,
+  "failed": false,
+  "failureReason": "",
+	"mode": "carousel",
+	"itemsTotal": 9,
+	"itemsReady": 3,
+	"itemsFailed": 0,
+	"currentItem": 4,
+	"carouselsTotal": 1,
+	"carouselsPublished": 0,
+	"items": [],
+	"carousels": [],
+  "url": "",
+  "historyId": "POSTIFYS_HISTORY_ID",
+  "raw": {}
+}
+```
+
+Continue polling while `shouldPoll` is `true`. Stop when `isComplete` becomes `true`; then check `published`, `failed`, and `failureReason`. Long Instagram videos include `mode: "carousel"`, item counters, and parent-carousel counters. Finished child containers are preparation state, not separate published posts. Use `raw` when you need the full Postifys response.
+
 ## Install in n8n
 
 In n8n, go to **Settings → Community Nodes**, then install:
@@ -165,6 +249,8 @@ n8n-nodes-postifys
 ```bash
 npm install
 npm run build
+npm test
+npm run release:check
 ```
 
 ## License

@@ -13,15 +13,74 @@ import { NodeApiError, NodeOperationError } from 'n8n-workflow';
 type PostifysCredentials = {
 	serverUrl: string;
 	apiKey: string;
-	mediaHostUrl?: string;
 };
 
-const normalizeMediaUrls = (value: string) => String(value || '')
-	.split(/\r?\n|,/)
-	.map((item) => item.trim())
-	.filter(Boolean);
+type PostifysApiError = {
+	message?: string;
+	response?: {
+		statusCode?: number;
+		body?: {
+			error?: string;
+			message?: string;
+			code?: string;
+		};
+	};
+};
+
+const POST_REQUEST_TIMEOUT_MS = 60 * 1000;
+const MEDIA_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
+const STATUS_REQUEST_TIMEOUT_MS = 2 * 60 * 1000;
+const MEDIA_STATUS_POLL_INTERVAL_MS = 3 * 1000;
 
 const BLOCKED_DIRECT_URL_PATTERNS = /drive\.google\.com|dropbox\.com|dropboxusercontent\.com/i;
+const REDNOTE_TEMP_MEDIA_PATTERN = /^https?:\/\/rednote\.postifys\.com\/media\/temp\//i;
+
+const trimTrailingSlash = (value: string) => String(value || '').replace(/\/$/, '');
+
+const normalizeMediaUrls = (value: string | string[] | unknown): string[] => {
+	if (Array.isArray(value)) {
+		return value.map((item) => String(item || '').trim()).filter(Boolean);
+	}
+	return String(value || '')
+		.split(/\r?\n|,/)
+		.map((item) => item.trim())
+		.filter(Boolean);
+};
+
+const firstString = (...values: unknown[]): string => {
+	for (const value of values) {
+		const text = String(value || '').trim();
+		if (text) return text;
+	}
+	return '';
+};
+
+const itemField = (item: INodeExecutionData, fieldName: string): unknown => {
+	if (!fieldName) return '';
+	return (item.json as Record<string, unknown>)[fieldName];
+};
+
+const sleep = async (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRednoteTempMediaUrl = (url: string): boolean => REDNOTE_TEMP_MEDIA_PATTERN.test(String(url || '').trim());
+
+const parsePostifysError = (error: unknown) => {
+	const apiError = error as PostifysApiError;
+	const body = apiError.response?.body || {};
+	const statusCode = apiError.response?.statusCode;
+	const code = body.code || (statusCode ? `HTTP_${statusCode}` : 'POSTIFYS_REQUEST_FAILED');
+	const message = body.error || body.message || apiError.message || 'Postifys request failed.';
+	return { message, code };
+};
+
+const connectionLoadErrorOption = (error: unknown): INodePropertyOptions[] => {
+	const parsed = parsePostifysError(error);
+	return [{
+		name: `Could not load Postifys accounts: ${parsed.message}`,
+		value: '',
+		description: `${parsed.code}. Check the Postifys API key and Server URL, then reload this dropdown.`,
+	}];
+};
 
 const assertDirectMediaUrls = (
 	node: INode,
@@ -33,28 +92,11 @@ const assertDirectMediaUrls = (
 		if (BLOCKED_DIRECT_URL_PATTERNS.test(url)) {
 			throw new NodeOperationError(
 				node,
-				`${label} cannot use Google Drive or Dropbox links. Add Media → Upload from URL first, then use serve_url.`,
+				`${label} cannot use Google Drive or Dropbox links directly. Add Media > Upload first, then use the returned url.`,
 				{ itemIndex },
 			);
 		}
 	}
-};
-
-const mediaHostUrl = (credentials: PostifysCredentials) => String(credentials.mediaHostUrl || 'https://rednote.postifys.com').replace(/\/$/, '');
-
-// Instagram Reels can take several minutes to process on Meta's side.
-const POST_REQUEST_TIMEOUT_MS = 20 * 60 * 1000;
-
-const parsePostifysError = (error: unknown) => {
-	const apiError = error as {
-		message?: string;
-		response?: { body?: { error?: string; code?: string } };
-	};
-
-	return {
-		message: apiError.response?.body?.error || apiError.message || 'Postifys request failed.',
-		code: apiError.response?.body?.code || 'POSTIFYS_REQUEST_FAILED',
-	};
 };
 
 const assertAccountId = (
@@ -64,20 +106,270 @@ const assertAccountId = (
 	label: string,
 ) => {
 	if (!String(value || '').trim()) {
-		throw new NodeOperationError(node, `${label} is required. Reconnect Meta in Postifys and reload the dropdown.`, { itemIndex });
+		throw new NodeOperationError(
+			node,
+			`${label} is required. Reconnect the account in Postifys and reload the dropdown.`,
+			{ itemIndex },
+		);
 	}
 };
 
 const getConnections = async (context: ILoadOptionsFunctions): Promise<any[]> => {
 	const credentials = await context.getCredentials('postifysApi') as PostifysCredentials;
-	const baseURL = String(credentials.serverUrl || '').replace(/\/$/, '');
+	const baseURL = trimTrailingSlash(credentials.serverUrl);
 	const response = await context.helpers.requestWithAuthentication.call(context, 'postifysApi', {
 		method: 'GET',
 		baseURL,
 		uri: '/api/connections',
 		json: true,
+		timeout: STATUS_REQUEST_TIMEOUT_MS,
 	});
 	return Array.isArray(response.connections) ? response.connections : [];
+};
+
+const connectionOptions = async (
+	context: ILoadOptionsFunctions,
+	platform: string,
+	emptyName: string,
+	emptyDescription: string,
+	mapName: (connection: any) => string,
+): Promise<INodePropertyOptions[]> => {
+	try {
+		const connections = await getConnections(context);
+		const filtered = connections.filter((connection) => connection.platform === platform);
+		if (!filtered.length) {
+			return [{ name: emptyName, value: '', description: emptyDescription }];
+		}
+		return filtered.map((connection) => ({
+			name: mapName(connection),
+			value: connection.id,
+			description: connection.status === 'reconnect_required' ? 'Reconnect required in Postifys.' : undefined,
+		}));
+	} catch (error) {
+		return connectionLoadErrorOption(error);
+	}
+};
+
+const getPostId = (response: Record<string, unknown>): string => {
+	const data = (response.data || {}) as Record<string, unknown>;
+	return firstString(
+		response.postId,
+		response.postSubmissionId,
+		response.historyId,
+		response.id,
+		data.postSubmissionId,
+		data.postId,
+		data.id,
+		data.publish_id,
+		data.video_id,
+		data.media_id,
+	);
+};
+
+export const normalizePostifysResult = (
+	platform: string,
+	operation: string,
+	response: Record<string, unknown>,
+) => {
+	const data = (response.data || {}) as Record<string, unknown>;
+	const status = firstString(response.status, data.status);
+	const normalizedStatus = status.toLowerCase();
+	const accepted = response.accepted === true || normalizedStatus === 'queued';
+	const isTikTokSuccess = platform === 'tiktok' && [
+		'publish_complete',
+		'send_to_user_inbox',
+		'upload_complete',
+	].includes(normalizedStatus);
+	const isPublished = normalizedStatus === 'published' || isTikTokSuccess;
+	const isFailed = normalizedStatus === 'failed';
+	const isComplete = isPublished || isFailed;
+	const parts = Array.isArray(response.parts)
+		? response.parts
+		: (Array.isArray(data.parts) ? data.parts : null);
+	const partProgress = parts ? {
+		parts,
+		partsTotal: Number(response.partsTotal ?? data.partsTotal ?? parts.length) || parts.length,
+		partsReady: Number(response.partsReady ?? data.partsReady) || 0,
+		partsPublished: Number(response.partsPublished ?? data.partsPublished) || 0,
+		partsFailed: Number(response.partsFailed ?? data.partsFailed) || 0,
+		currentPart: Number(response.currentPart ?? data.currentPart) || 0,
+	} : {};
+	const items = Array.isArray(response.items)
+		? response.items
+		: (Array.isArray(data.items) ? data.items : null);
+	const carousels = Array.isArray(response.carousels)
+		? response.carousels
+		: (Array.isArray(data.carousels) ? data.carousels : null);
+	const mode = firstString(response.mode, data.mode);
+	const carouselProgress = mode === 'carousel' || items || carousels ? {
+		mode: mode || 'carousel',
+		items: items || [],
+		itemsTotal: Number(response.itemsTotal ?? data.itemsTotal ?? items?.length ?? 0) || items?.length || 0,
+		itemsReady: Number(response.itemsReady ?? data.itemsReady) || 0,
+		itemsFailed: Number(response.itemsFailed ?? data.itemsFailed) || 0,
+		currentItem: Number(response.currentItem ?? data.currentItem) || 0,
+		carousels: carousels || [],
+		carouselsTotal: Number(response.carouselsTotal ?? data.carouselsTotal ?? carousels?.length ?? 0) || carousels?.length || 0,
+		carouselsReady: Number(response.carouselsReady ?? data.carouselsReady) || 0,
+		carouselsPublished: Number(response.carouselsPublished ?? data.carouselsPublished) || 0,
+		currentCarousel: Number(response.currentCarousel ?? data.currentCarousel) || 0,
+		parentContainerId: firstString(response.parentContainerId, data.parentContainerId),
+		publishedMediaId: firstString(response.publishedMediaId, data.publishedMediaId),
+	} : {};
+
+	const postMode = firstString(data.post_mode, response.postMode);
+	const collaborators = Array.isArray(response.collaborators)
+		? response.collaborators
+		: (Array.isArray(data.collaborators) ? data.collaborators : null);
+	const collaboratorInvites = Array.isArray(response.collaboratorInvites)
+		? response.collaboratorInvites
+		: (Array.isArray(data.collaboratorInvites) ? data.collaboratorInvites : null);
+	const collaboratorSummary = (collaborators || collaboratorInvites)
+		? {
+			...(collaborators ? { collaborators } : {}),
+			...(collaboratorInvites ? { collaboratorInvites } : {}),
+		}
+		: {};
+
+	return {
+		success: response.success !== false,
+		platform,
+		operation,
+		postId: getPostId(response),
+		status: status || (accepted ? 'queued' : ''),
+		stage: firstString(response.stage, data.stage),
+		accepted,
+		isComplete,
+		shouldPoll: accepted || ['queued', 'pending', 'processing', 'processing_upload', 'processing_download'].includes(normalizedStatus),
+		published: isPublished,
+		failed: isFailed,
+		failureReason: firstString(response.failureReason, response.error, data.failureReason, data.error),
+		url: firstString(response.url, response.link, data.url, data.link),
+		historyId: firstString(response.historyId, response.postId, response.postSubmissionId),
+		...(postMode ? { postMode } : {}),
+		...partProgress,
+		...carouselProgress,
+		...collaboratorSummary,
+		raw: response,
+	};
+};
+
+const inputMediaUrl = (item: INodeExecutionData): string => firstString(
+	item.json.serve_url,
+	item.json.serveUrl,
+	item.json.media_url,
+	item.json.mediaUrl,
+	item.json.direct_url,
+	item.json.directUrl,
+);
+
+const inputSourceUrl = (item: INodeExecutionData): string => firstString(
+	item.json.source_url,
+	item.json.sourceUrl,
+	item.json.drive_link,
+	item.json.driveLink,
+	item.json.url,
+	item.json.path,
+);
+
+const inputTitle = (item: INodeExecutionData): string => firstString(
+	item.json.title,
+	item.json.caption,
+	item.json.current_title,
+	item.json.file_name,
+);
+
+const uploadedMediaUrl = (response: Record<string, unknown>): string => firstString(
+	response.url,
+	response.media_url,
+	response.mediaUrl,
+	response.serve_url,
+	response.serveUrl,
+	response.direct_url,
+	response.directUrl,
+	(response.data as Record<string, unknown> | undefined)?.url,
+	(response.data as Record<string, unknown> | undefined)?.media_url,
+	(response.data as Record<string, unknown> | undefined)?.serve_url,
+);
+
+const uploadedMediaName = (response: Record<string, unknown>): string => firstString(
+	response.name,
+	response.filename,
+	response.file_name,
+	(response.data as Record<string, unknown> | undefined)?.name,
+	(response.data as Record<string, unknown> | undefined)?.filename,
+	(response.data as Record<string, unknown> | undefined)?.file_name,
+);
+
+const normalizeUploadedMediaResult = (
+	response: Record<string, unknown>,
+) => {
+	const serveUrl = uploadedMediaUrl(response);
+	return {
+		name: uploadedMediaName(response),
+		serve_url: serveUrl,
+	};
+};
+
+const queuePostifysMediaUpload = async (
+	context: IExecuteFunctions,
+	baseURL: string,
+	sourceUrl: string,
+	filename: string,
+	itemIndex: number,
+): Promise<Record<string, unknown>> => {
+	const queued = await context.helpers.requestWithAuthentication.call(context, 'postifysApi', {
+		method: 'POST',
+		baseURL,
+		uri: '/api/media/queue',
+		body: {
+			url: sourceUrl,
+			type: 'any',
+			...(filename ? { filename } : {}),
+		},
+		json: true,
+		timeout: STATUS_REQUEST_TIMEOUT_MS,
+	}) as Record<string, unknown>;
+
+	const mediaJobId = firstString(queued.mediaJobId, queued.jobId, queued.id);
+	if (!mediaJobId) {
+		throw new NodeOperationError(context.getNode(), 'Postifys media queue did not return a mediaJobId.', { itemIndex });
+	}
+
+	const startedAt = Date.now();
+	let latest = queued;
+	while (Date.now() - startedAt < MEDIA_UPLOAD_TIMEOUT_MS) {
+		const status = firstString(latest.status).toLowerCase();
+		if (status === 'completed') {
+			if (!uploadedMediaUrl(latest)) {
+				throw new NodeOperationError(context.getNode(), 'Postifys media job completed without a serve_url.', { itemIndex });
+			}
+			return latest;
+		}
+		if (status === 'failed') {
+			const reason = firstString(latest.failureReason, latest.error, latest.message) || 'Postifys media upload failed.';
+			throw new NodeOperationError(context.getNode(), reason, { itemIndex });
+		}
+
+		await sleep(MEDIA_STATUS_POLL_INTERVAL_MS);
+		latest = await context.helpers.requestWithAuthentication.call(context, 'postifysApi', {
+			method: 'GET',
+			baseURL,
+			uri: '/api/media/status',
+			qs: { mediaJobId },
+			json: true,
+			timeout: STATUS_REQUEST_TIMEOUT_MS,
+		}) as Record<string, unknown>;
+	}
+
+	throw new NodeOperationError(context.getNode(), 'Timed out waiting for Postifys media upload to complete.', { itemIndex });
+};
+
+export const __postifysTestUtils = {
+	normalizeMediaUrls,
+	normalizePostifysResult,
+	normalizeUploadedMediaResult,
+	isRednoteTempMediaUrl,
 };
 
 export class Postifys implements INodeType {
@@ -107,14 +399,8 @@ export class Postifys implements INodeType {
 				type: 'options',
 				noDataExpression: true,
 				options: [
-					{
-						name: 'Media',
-						value: 'media',
-					},
-					{
-						name: 'Post',
-						value: 'post',
-					},
+					{ name: 'Media', value: 'media' },
+					{ name: 'Post', value: 'post' },
 				],
 				default: 'media',
 			},
@@ -123,68 +409,123 @@ export class Postifys implements INodeType {
 				name: 'operation',
 				type: 'options',
 				noDataExpression: true,
-				displayOptions: {
-					show: {
-						resource: ['post'],
-					},
-				},
+				displayOptions: { show: { resource: ['media'] } },
 				options: [
 					{
-						name: 'Create',
-						value: 'create',
-						action: 'Create a post',
+						name: 'Upload',
+						value: 'uploadFromUrl',
+						description: 'Upload an image or video URL to Postifys and return a hosted media URL',
+						action: 'Upload media',
+					},
+					{
+						name: 'Ensure Uploaded URL',
+						value: 'ensureMediaUrl',
+						description: 'Reuse an existing hosted URL from the input, or upload the URL if one is missing',
+						action: 'Ensure uploaded media URL',
 					},
 				],
-				default: 'create',
+				default: 'uploadFromUrl',
 			},
 			{
 				displayName: 'Operation',
 				name: 'operation',
 				type: 'options',
 				noDataExpression: true,
+				displayOptions: { show: { resource: ['post'] } },
+				options: [
+					{ name: 'Create', value: 'create', action: 'Create a post' },
+					{ name: 'Get Status', value: 'getStatus', action: 'Get post status' },
+				],
+				default: 'create',
+			},
+			{
+				displayName: 'Auto Map Input Fields',
+				name: 'rednoteBatchMode',
+				type: 'boolean',
 				displayOptions: {
 					show: {
 						resource: ['media'],
+						operation: ['ensureMediaUrl'],
 					},
 				},
-				options: [
-					{
-						name: 'Upload from URL',
-						value: 'uploadFromUrl',
-						description: 'Download Google Drive or other URLs to a direct MP4/image link. Auto-deletes after 30 minutes.',
-						action: 'Upload media from URL',
-					},
-				],
-				default: 'uploadFromUrl',
+				default: true,
+				description: 'Whether to reuse common input fields like url, media_url, serve_url, source_url, drive_link, path, and file_name',
 			},
 			{
-				displayName: 'Source URL',
+				displayName: 'URL',
 				name: 'sourceUrl',
 				type: 'string',
 				displayOptions: {
 					show: {
 						resource: ['media'],
-						operation: ['uploadFromUrl'],
+						operation: ['uploadFromUrl', 'ensureMediaUrl'],
 					},
 				},
 				default: '',
-				placeholder: 'https://drive.google.com/uc?export=download&id=FILE_ID',
-				description: 'Google Drive share/download link or any public media URL to re-host as a direct file',
+				placeholder: '={{ $json.url }}',
 				required: true,
+				description: 'Image or video URL to upload. This can be a direct media URL, Google Drive link, Dropbox link, S3/CDN URL, or another remote media URL.',
 			},
 			{
-				displayName: 'Filename',
-				name: 'uploadFilename',
-				type: 'string',
+				displayName: 'Skip Item If URL Is Missing',
+				name: 'skipMissingMedia',
+				type: 'boolean',
 				displayOptions: {
 					show: {
 						resource: ['media'],
-						operation: ['uploadFromUrl'],
+						operation: ['uploadFromUrl', 'ensureMediaUrl'],
 					},
 				},
-				default: '',
-				placeholder: 'video.mp4',
-				description: 'Optional filename hint when the source URL does not include one',
+				default: true,
+				description: 'Whether to output a skipped item instead of failing the workflow when an item has no URL',
+			},
+			{
+				displayName: 'Status Endpoint Path',
+				name: 'statusPath',
+				type: 'string',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['getStatus'],
+					},
+				},
+				default: '/api/posts/status',
+				description: 'GET endpoint path used to check status. The node adds postId and platform as query parameters.',
+			},
+			{
+				displayName: 'Post ID',
+				name: 'postId',
+				type: 'string',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['getStatus'],
+					},
+				},
+				default: '={{ $json.postId || $json.historyId || $json.publish_id }}',
+				required: true,
+				description: 'Postifys history ID or platform post/publish ID returned by Create',
+			},
+			{
+				displayName: 'Platform',
+				name: 'statusPlatform',
+				type: 'options',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['getStatus'],
+					},
+				},
+				options: [
+					{ name: 'Facebook', value: 'facebook' },
+					{ name: 'Instagram', value: 'instagram' },
+					{ name: 'YouTube', value: 'youtube' },
+					{ name: 'Pinterest', value: 'pinterest' },
+					{ name: 'LinkedIn', value: 'linkedin' },
+					{ name: 'TikTok', value: 'tiktok' },
+				],
+				default: 'instagram',
+				description: 'Platform associated with the post ID',
 			},
 			{
 				displayName: 'Platform',
@@ -198,41 +539,48 @@ export class Postifys implements INodeType {
 					},
 				},
 				options: [
-					{
-						name: 'Facebook',
-						value: 'facebook',
-					},
-					{
-						name: 'Instagram',
-						value: 'instagram',
-					},
-					{
-						name: 'YouTube',
-						value: 'youtube',
-					},
-					{
-						name: 'Pinterest',
-						value: 'pinterest',
-					},
-					{
-						name: 'LinkedIn',
-						value: 'linkedin',
-					},
-					{
-						name: 'TikTok',
-						value: 'tiktok',
-					},
+					{ name: 'Facebook', value: 'facebook' },
+					{ name: 'Instagram', value: 'instagram' },
+					{ name: 'YouTube', value: 'youtube' },
+					{ name: 'Pinterest', value: 'pinterest' },
+					{ name: 'LinkedIn', value: 'linkedin' },
+					{ name: 'TikTok', value: 'tiktok' },
 				],
 				default: 'facebook',
-				description: 'Social platform to publish to.',
+				description: 'Social platform to publish to',
+			},
+			{
+				displayName: 'Auto Map Input Fields',
+				name: 'rednotePostBatchMode',
+				type: 'boolean',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+					},
+				},
+				default: true,
+				description: 'Whether blank post fields should fall back to common input fields like url, media_url, serve_url, title, and caption',
+			},
+			{
+				displayName: 'Skip Item If Media URL Is Missing',
+				name: 'skipMissingPostMedia',
+				type: 'boolean',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						rednotePostBatchMode: [true],
+					},
+				},
+				default: true,
+				description: 'Whether media post rows without a media URL should be skipped instead of failing',
 			},
 			{
 				displayName: 'Facebook Page',
 				name: 'pageId',
 				type: 'options',
-				typeOptions: {
-					loadOptionsMethod: 'getFacebookPages',
-				},
+				typeOptions: { loadOptionsMethod: 'getFacebookPages' },
 				required: true,
 				displayOptions: {
 					show: {
@@ -242,15 +590,13 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				description: 'Connected Facebook Page to publish to.',
+				description: 'Connected Facebook Page to publish to',
 			},
 			{
 				displayName: 'Instagram Account',
 				name: 'instagramAccountId',
 				type: 'options',
-				typeOptions: {
-					loadOptionsMethod: 'getInstagramAccounts',
-				},
+				typeOptions: { loadOptionsMethod: 'getInstagramAccounts' },
 				required: true,
 				displayOptions: {
 					show: {
@@ -260,7 +606,23 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				description: 'Connected Instagram professional account to publish to.',
+				description: 'Connected Instagram professional account to publish to',
+			},
+			{
+				displayName: 'TikTok Account',
+				name: 'tiktokAccountId',
+				type: 'options',
+				typeOptions: { loadOptionsMethod: 'getTikTokAccounts' },
+				required: true,
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['tiktok'],
+					},
+				},
+				default: '',
+				description: 'Connected TikTok creator from Postifys OAuth (connect TikTok at https://postifys.com/app first)',
 			},
 			{
 				displayName: 'Facebook Post Mode',
@@ -274,29 +636,18 @@ export class Postifys implements INodeType {
 					},
 				},
 				options: [
-					{
-						name: 'Feed (Text / Link)',
-						value: 'FEED',
-					},
-					{
-						name: 'Image',
-						value: 'IMAGE',
-					},
-					{
-						name: 'Video / Reel',
-						value: 'REEL',
-					},
+					{ name: 'Feed (Text / Link)', value: 'FEED' },
+					{ name: 'Image', value: 'IMAGE' },
+					{ name: 'Video / Reel', value: 'REEL' },
 				],
 				default: 'REEL',
-				description: 'Choose Feed for text or link posts, Image for native photos, or Video / Reel for Facebook Reels.',
+				description: 'Choose Feed for text or link posts, Image for native photos, or Video / Reel for Facebook Reels',
 			},
 			{
 				displayName: 'YouTube Channel',
 				name: 'channelId',
 				type: 'options',
-				typeOptions: {
-					loadOptionsMethod: 'getYouTubeChannels',
-				},
+				typeOptions: { loadOptionsMethod: 'getYouTubeChannels' },
 				required: true,
 				displayOptions: {
 					show: {
@@ -306,15 +657,13 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				description: 'Connected YouTube channel to upload to.',
+				description: 'Connected YouTube channel to upload to',
 			},
 			{
 				displayName: 'Pinterest Account',
 				name: 'pinterestUserId',
 				type: 'options',
-				typeOptions: {
-					loadOptionsMethod: 'getPinterestAccounts',
-				},
+				typeOptions: { loadOptionsMethod: 'getPinterestAccounts' },
 				required: true,
 				displayOptions: {
 					show: {
@@ -324,15 +673,13 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				description: 'Connected Pinterest account to publish from.',
+				description: 'Connected Pinterest account to publish from',
 			},
 			{
 				displayName: 'Pinterest Board',
 				name: 'boardId',
 				type: 'options',
-				typeOptions: {
-					loadOptionsMethod: 'getPinterestBoards',
-				},
+				typeOptions: { loadOptionsMethod: 'getPinterestBoards' },
 				required: true,
 				displayOptions: {
 					show: {
@@ -342,15 +689,13 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				description: 'Connected Pinterest board to publish to.',
+				description: 'Connected Pinterest board to publish to',
 			},
 			{
 				displayName: 'LinkedIn Account',
 				name: 'linkedinUserId',
 				type: 'options',
-				typeOptions: {
-					loadOptionsMethod: 'getLinkedInAccounts',
-				},
+				typeOptions: { loadOptionsMethod: 'getLinkedInAccounts' },
 				required: true,
 				displayOptions: {
 					show: {
@@ -360,7 +705,7 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				description: 'Connected LinkedIn member account to publish to.',
+				description: 'Connected LinkedIn member account to publish to',
 			},
 			{
 				displayName: 'LinkedIn Post Type',
@@ -374,22 +719,10 @@ export class Postifys implements INodeType {
 					},
 				},
 				options: [
-					{
-						name: 'Text',
-						value: 'text',
-					},
-					{
-						name: 'Image',
-						value: 'image',
-					},
-					{
-						name: 'Video',
-						value: 'video',
-					},
-					{
-						name: 'Link Preview',
-						value: 'link',
-					},
+					{ name: 'Text', value: 'text' },
+					{ name: 'Image', value: 'image' },
+					{ name: 'Video', value: 'video' },
+					{ name: 'Link Preview', value: 'link' },
 				],
 				default: 'image',
 				description: 'Choose Image or Video to upload native LinkedIn media. Link Preview renders a URL card.',
@@ -406,25 +739,62 @@ export class Postifys implements INodeType {
 					},
 				},
 				options: [
-					{
-						name: 'Image',
-						value: 'IMAGE',
-					},
-					{
-						name: 'Video / Reel',
-						value: 'REEL',
-					},
+					{ name: 'Image', value: 'IMAGE' },
+					{ name: 'Video / Reel', value: 'REEL' },
 				],
 				default: 'IMAGE',
-				description: 'Choose Image for photo posts or Video / Reel for Instagram Reels.',
+				description: 'Choose Image for photo posts or Video / Reel for Instagram Reels',
+			},
+			{
+				displayName: 'Collaborators',
+				name: 'collaborators',
+				type: 'string',
+				typeOptions: { rows: 2 },
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['instagram'],
+						mediaType: ['REEL'],
+					},
+				},
+				default: '',
+				description: 'Optional Instagram usernames to invite as Reel collaborators (up to 3). Comma or newline separated. Leading @ is stripped.',
+			},
+			{
+				displayName: 'Collaborators',
+				name: 'collaborators',
+				type: 'string',
+				typeOptions: { rows: 2 },
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['facebook'],
+						facebookPostMode: ['REEL'],
+					},
+				},
+				default: '',
+				description: 'Optional Facebook Page IDs to invite as Reel collaborators (up to 10). Comma or newline separated.',
+			},
+			{
+				displayName: 'Post Asynchronously',
+				name: 'asyncPublish',
+				type: 'boolean',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+					},
+				},
+				default: true,
+				description: 'Whether to return a postId immediately and let Postifys finish uploading/publishing in the background. Use Get Status later if you need the final result. Turn off to wait until the platform publish completes.',
 			},
 			{
 				displayName: 'Text',
 				name: 'text',
 				type: 'string',
-				typeOptions: {
-					rows: 4,
-				},
+				typeOptions: { rows: 4 },
 				displayOptions: {
 					show: {
 						resource: ['post'],
@@ -433,15 +803,13 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				description: 'Post text or caption. For LinkedIn, Text is required.',
+				description: 'Post text or caption. With Auto Map Input Fields enabled, blank text falls back to input title or caption.',
 			},
 			{
 				displayName: 'Caption',
 				name: 'caption',
 				type: 'string',
-				typeOptions: {
-					rows: 4,
-				},
+				typeOptions: { rows: 4 },
 				displayOptions: {
 					show: {
 						resource: ['post'],
@@ -450,7 +818,7 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				description: 'TikTok video caption.',
+				description: 'TikTok video caption. With Auto Map Input Fields enabled, blank caption falls back to input title or caption.',
 			},
 			{
 				displayName: 'Title',
@@ -471,9 +839,7 @@ export class Postifys implements INodeType {
 				displayName: 'Description',
 				name: 'description',
 				type: 'string',
-				typeOptions: {
-					rows: 4,
-				},
+				typeOptions: { rows: 4 },
 				displayOptions: {
 					show: {
 						resource: ['post'],
@@ -519,9 +885,7 @@ export class Postifys implements INodeType {
 				displayName: 'Media URLs',
 				name: 'mediaUrls',
 				type: 'string',
-				typeOptions: {
-					rows: 3,
-				},
+				typeOptions: { rows: 3 },
 				displayOptions: {
 					show: {
 						resource: ['post'],
@@ -531,7 +895,7 @@ export class Postifys implements INodeType {
 				},
 				default: '',
 				placeholder: '={{ $json.serve_url }}',
-				description: 'Use serve_url from Media → Upload from URL. One URL per line or comma-separated.',
+				description: 'Use serve_url from Media > Upload. One URL per line or comma-separated.',
 			},
 			{
 				displayName: 'Image URL',
@@ -546,7 +910,7 @@ export class Postifys implements INodeType {
 				},
 				default: '',
 				placeholder: '={{ $json.serve_url }}',
-				description: 'Use serve_url from Media → Upload from URL.',
+				description: 'Use serve_url from Media > Upload.',
 			},
 			{
 				displayName: 'Image URL',
@@ -562,7 +926,7 @@ export class Postifys implements INodeType {
 				},
 				default: '',
 				placeholder: '={{ $json.serve_url }}',
-				description: 'Use serve_url from Media → Upload from URL.',
+				description: 'Use serve_url from Media > Upload.',
 			},
 			{
 				displayName: 'Video URL',
@@ -578,7 +942,7 @@ export class Postifys implements INodeType {
 				},
 				default: '',
 				placeholder: '={{ $json.serve_url }}',
-				description: 'Use serve_url from Media → Upload from URL.',
+				description: 'Use serve_url from Media > Upload.',
 			},
 			{
 				displayName: 'Video URL',
@@ -593,7 +957,7 @@ export class Postifys implements INodeType {
 				},
 				default: '',
 				placeholder: '={{ $json.serve_url }}',
-				description: 'Use serve_url from Media → Upload from URL.',
+				description: 'Use serve_url from Media > Upload.',
 			},
 			{
 				displayName: 'Thumbnail URL',
@@ -608,7 +972,7 @@ export class Postifys implements INodeType {
 				},
 				default: '',
 				placeholder: 'https://example.com/thumbnail.jpg',
-				description: 'Optional public image URL for the YouTube custom thumbnail. If empty, YouTube uses an auto-generated frame.',
+				description: 'Optional public image URL for the YouTube custom thumbnail.',
 			},
 			{
 				displayName: 'Privacy Status',
@@ -622,21 +986,70 @@ export class Postifys implements INodeType {
 					},
 				},
 				options: [
-					{
-						name: 'Private',
-						value: 'private',
-					},
-					{
-						name: 'Unlisted',
-						value: 'unlisted',
-					},
-					{
-						name: 'Public',
-						value: 'public',
-					},
+					{ name: 'Private', value: 'private' },
+					{ name: 'Unlisted', value: 'unlisted' },
+					{ name: 'Public', value: 'public' },
 				],
 				default: 'private',
 				description: 'Visibility for the uploaded YouTube video.',
+			},
+			{
+				displayName: 'TikTok Privacy',
+				name: 'tiktokPrivacy',
+				type: 'options',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['tiktok'],
+					},
+				},
+				options: [
+					{ name: 'Public to Everyone', value: 'PUBLIC_TO_EVERYONE' },
+					{ name: 'Mutual Follow Friends', value: 'MUTUAL_FOLLOW_FRIENDS' },
+					{ name: 'Self Only', value: 'SELF_ONLY' },
+				],
+				default: 'PUBLIC_TO_EVERYONE',
+				description: 'Used for Direct Post (video.publish). With video.upload (inbox draft), TikTok delivers a draft to the creator inbox and final visibility is set in the TikTok app.',
+			},
+			{
+				displayName: 'Disable TikTok Comments',
+				name: 'disableComment',
+				type: 'boolean',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['tiktok'],
+					},
+				},
+				default: false,
+			},
+			{
+				displayName: 'Disable TikTok Duet',
+				name: 'disableDuet',
+				type: 'boolean',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['tiktok'],
+					},
+				},
+				default: false,
+			},
+			{
+				displayName: 'Disable TikTok Stitch',
+				name: 'disableStitch',
+				type: 'boolean',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['tiktok'],
+					},
+				},
+				default: false,
 			},
 			{
 				displayName: 'Tags',
@@ -687,110 +1100,95 @@ export class Postifys implements INodeType {
 	methods = {
 		loadOptions: {
 			async getFacebookPages(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				const connections = await getConnections(this);
-				const pages = connections.filter((c) => c.platform === 'facebook');
-				if (!pages.length) {
-					return [{
-						name: 'No Facebook Pages found. Reconnect Meta in Postifys.',
-						value: '',
-						description: 'Open Postifys, connect Facebook again, then reload this dropdown.',
-					}];
-				}
-				return pages.map((page: { id: string; name?: string }) => ({
-					name: page.name || page.id,
-					value: page.id,
-				}));
+				return connectionOptions(
+					this,
+					'facebook',
+					'No Facebook Pages found. Reconnect Meta in Postifys.',
+					'Open Postifys, connect Facebook again, then reload this dropdown.',
+					(page) => page.name || page.id,
+				);
 			},
 
 			async getInstagramAccounts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				const connections = await getConnections(this);
-				const instagrams = connections.filter((c) => c.platform === 'instagram');
-				if (!instagrams.length) {
-					return [{
-						name: 'No Instagram accounts found. Reconnect Meta in Postifys.',
-						value: '',
-						description: 'Open Postifys, connect Instagram/Facebook again, then reload this dropdown.',
-					}];
-				}
-				return instagrams.map((instagram: { id: string; username?: string; name?: string }) => ({
-					name: instagram.username ? `@${instagram.username}` : instagram.name || instagram.id,
-					value: instagram.id,
-				}));
+				return connectionOptions(
+					this,
+					'instagram',
+					'No Instagram accounts found. Reconnect Meta in Postifys.',
+					'Open Postifys, connect Instagram/Facebook again, then reload this dropdown.',
+					(instagram) => instagram.username ? `@${instagram.username}` : instagram.name || instagram.id,
+				);
 			},
 
 			async getYouTubeChannels(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				const connections = await getConnections(this);
-				const channels = connections.filter((c) => c.platform === 'youtube');
-				if (!channels.length) {
-					return [{
-						name: 'No YouTube channels found. Connect YouTube in Postifys.',
-						value: '',
-						description: 'Open Postifys, connect YouTube, then reload this dropdown.',
-					}];
-				}
-				return channels.map((channel: { id: string; name?: string }) => ({
-					name: channel.name || channel.id,
-					value: channel.id,
-				}));
+				return connectionOptions(
+					this,
+					'youtube',
+					'No YouTube channels found. Connect YouTube in Postifys.',
+					'Open Postifys, connect YouTube, then reload this dropdown.',
+					(channel) => channel.name || channel.id,
+				);
 			},
 
 			async getPinterestAccounts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				const connections = await getConnections(this);
-				const accounts = connections.filter((c) => c.platform === 'pinterest');
-				if (!accounts.length) {
-					return [{
-						name: 'No Pinterest accounts found. Connect Pinterest in Postifys.',
-						value: '',
-						description: 'Open Postifys, connect Pinterest, then reload this dropdown.',
-					}];
-				}
-				return accounts.map((account: { id: string; username?: string; name?: string }) => ({
-					name: account.username ? `@${account.username}` : account.name || account.id,
-					value: account.id,
-				}));
+				return connectionOptions(
+					this,
+					'pinterest',
+					'No Pinterest accounts found. Connect Pinterest in Postifys.',
+					'Open Postifys, connect Pinterest, then reload this dropdown.',
+					(account) => account.username ? `@${account.username}` : account.name || account.id,
+				);
 			},
 
 			async getPinterestBoards(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				const credentials = await this.getCredentials('postifysApi') as PostifysCredentials;
-				const baseURL = String(credentials.serverUrl || '').replace(/\/$/, '');
-				const pinterestUserId = String(this.getNodeParameter('pinterestUserId', 0) || '').trim();
-				const uri = pinterestUserId
-					? `/api/pinterest/boards?pinterestUserId=${encodeURIComponent(pinterestUserId)}`
-					: '/api/pinterest/boards';
-				const response = await this.helpers.requestWithAuthentication.call(this, 'postifysApi', {
-					method: 'GET',
-					baseURL,
-					uri,
-					json: true,
-				});
-				const boards = Array.isArray(response.boards) ? response.boards : [];
-				if (!boards.length) {
-					return [{
-						name: 'No Pinterest boards found. Connect Pinterest in Postifys.',
-						value: '',
-						description: 'Open Postifys, connect Pinterest, then reload this dropdown.',
-					}];
+				try {
+					const credentials = await this.getCredentials('postifysApi') as PostifysCredentials;
+					const baseURL = trimTrailingSlash(credentials.serverUrl);
+					const pinterestUserId = String(this.getNodeParameter('pinterestUserId', 0) || '').trim();
+					const uri = pinterestUserId
+						? `/api/pinterest/boards?pinterestUserId=${encodeURIComponent(pinterestUserId)}`
+						: '/api/pinterest/boards';
+					const response = await this.helpers.requestWithAuthentication.call(this, 'postifysApi', {
+						method: 'GET',
+						baseURL,
+						uri,
+						json: true,
+						timeout: STATUS_REQUEST_TIMEOUT_MS,
+					});
+					const boards = Array.isArray(response.boards) ? response.boards : [];
+					if (!boards.length) {
+						return [{
+							name: 'No Pinterest boards found. Connect Pinterest in Postifys.',
+							value: '',
+							description: 'Open Postifys, connect Pinterest, then reload this dropdown.',
+						}];
+					}
+					return boards.map((board: { id: string; name?: string }) => ({
+						name: board.name || board.id,
+						value: board.id,
+					}));
+				} catch (error) {
+					return connectionLoadErrorOption(error);
 				}
-				return boards.map((board: { id: string; name?: string }) => ({
-					name: board.name || board.id,
-					value: board.id,
-				}));
 			},
 
 			async getLinkedInAccounts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				const connections = await getConnections(this);
-				const accounts = connections.filter((c) => c.platform === 'linkedin');
-				if (!accounts.length) {
-					return [{
-						name: 'No LinkedIn accounts found. Connect LinkedIn in Postifys.',
-						value: '',
-						description: 'Open Postifys, connect LinkedIn, then reload this dropdown.',
-					}];
-				}
-				return accounts.map((account: { id: string; name?: string; email?: string }) => ({
-					name: account.email ? `${account.name || account.id} (${account.email})` : account.name || account.id,
-					value: account.id,
-				}));
+				return connectionOptions(
+					this,
+					'linkedin',
+					'No LinkedIn accounts found. Connect LinkedIn in Postifys.',
+					'Open Postifys, connect LinkedIn, then reload this dropdown.',
+					(account) => account.email ? `${account.name || account.id} (${account.email})` : account.name || account.id,
+				);
+			},
+
+			async getTikTokAccounts(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				return connectionOptions(
+					this,
+					'tiktok',
+					'No TikTok accounts found. Connect TikTok in Postifys.',
+					'Open https://postifys.com/app, click TikTok under Add Account, authorize, then reload this dropdown.',
+					(account) => account.username ? `@${account.username}` : account.name || account.id,
+				);
 			},
 		},
 	};
@@ -799,67 +1197,126 @@ export class Postifys implements INodeType {
 		const items = this.getInputData();
 		const returnData: INodeExecutionData[] = [];
 		const credentials = await this.getCredentials('postifysApi') as PostifysCredentials;
-		const baseURL = String(credentials.serverUrl || '').replace(/\/$/, '');
+		const baseURL = trimTrailingSlash(credentials.serverUrl);
 
 		for (let i = 0; i < items.length; i++) {
 			try {
+				const item = items[i];
 				const resource = this.getNodeParameter('resource', i) as string;
+				const operation = this.getNodeParameter('operation', i) as string;
 
 				if (resource === 'media') {
-					const operation = this.getNodeParameter('operation', i) as string;
-					const host = mediaHostUrl(credentials);
+					if (!['uploadFromUrl', 'ensureMediaUrl'].includes(operation)) {
+						throw new NodeOperationError(this.getNode(), `Unsupported media operation: ${operation}`, { itemIndex: i });
+					}
 
-					if (operation === 'uploadFromUrl') {
-						const sourceUrl = String(this.getNodeParameter('sourceUrl', i, '') || '').trim();
-						const uploadFilename = String(this.getNodeParameter('uploadFilename', i, '') || '').trim();
-						if (!sourceUrl) {
-							throw new NodeOperationError(this.getNode(), 'Source URL is required.', { itemIndex: i });
-						}
-
-						const responseData = await this.helpers.request({
-							method: 'POST',
-							url: `${host}/api/temp-media/from-url`,
-							headers: {
-								'Content-Type': 'application/json',
-							},
-							body: {
-								url: sourceUrl,
-								...(uploadFilename ? { filename: uploadFilename } : {}),
-							},
-							json: true,
-						}) as Record<string, unknown>;
-
+					const useRednoteBatch = this.getNodeParameter('rednoteBatchMode', i, true) as boolean;
+					const sourceUrlField = this.getNodeParameter('sourceUrlField', i, 'drive_link') as string;
+					const filenameField = this.getNodeParameter('filenameField', i, 'file_name') as string;
+					const existingServeUrl = useRednoteBatch ? inputMediaUrl(item) : '';
+					if (operation === 'ensureMediaUrl' && existingServeUrl && !isRednoteTempMediaUrl(existingServeUrl)) {
 						returnData.push({
 							json: {
-								success: true,
-								...responseData,
+								name: firstString(item.json.name, item.json.filename, item.json.file_name, inputTitle(item)),
+								serve_url: existingServeUrl,
 							},
 							pairedItem: { item: i },
 						});
 						continue;
 					}
+					const sourceUrl = firstString(
+						this.getNodeParameter('sourceUrl', i, ''),
+						useRednoteBatch ? itemField(item, sourceUrlField) : '',
+						useRednoteBatch ? inputSourceUrl(item) : '',
+						isRednoteTempMediaUrl(existingServeUrl) ? existingServeUrl : '',
+					);
+					const uploadFilename = firstString(
+						this.getNodeParameter('uploadFilename', i, ''),
+						useRednoteBatch ? itemField(item, filenameField) : '',
+						useRednoteBatch ? item.json.file_name : '',
+					);
 
-					throw new NodeOperationError(this.getNode(), `Unsupported media operation: ${operation}`, { itemIndex: i });
+					if (!sourceUrl) {
+						if (this.getNodeParameter('skipMissingMedia', i, true) as boolean) {
+							returnData.push({
+								json: {
+									success: false,
+									skipped: true,
+									code: 'POSTIFYS_MEDIA_SOURCE_MISSING',
+									error: 'No source URL found for this item.',
+								},
+								pairedItem: { item: i },
+							});
+							continue;
+						}
+						throw new NodeOperationError(this.getNode(), 'Source URL is required.', { itemIndex: i });
+					}
+
+					const responseData = await queuePostifysMediaUpload(this, baseURL, sourceUrl, uploadFilename, i);
+
+					returnData.push({
+						json: normalizeUploadedMediaResult(responseData),
+						pairedItem: { item: i },
+					});
+					continue;
+				}
+
+				if (operation === 'getStatus') {
+					const postId = String(this.getNodeParameter('postId', i, '') || '').trim();
+					const platform = this.getNodeParameter('statusPlatform', i, 'instagram') as string;
+					const statusPath = String(this.getNodeParameter('statusPath', i, '/api/posts/status') || '').trim();
+					if (!postId) {
+						throw new NodeOperationError(this.getNode(), 'Post ID is required.', { itemIndex: i });
+					}
+					const separator = statusPath.includes('?') ? '&' : '?';
+					const responseData = await this.helpers.requestWithAuthentication.call(this, 'postifysApi', {
+						method: 'GET',
+						baseURL,
+						uri: `${statusPath}${separator}postId=${encodeURIComponent(postId)}&platform=${encodeURIComponent(platform)}`,
+						json: true,
+						timeout: STATUS_REQUEST_TIMEOUT_MS,
+					}) as Record<string, unknown>;
+
+					returnData.push({
+						json: normalizePostifysResult(platform, 'getStatus', responseData),
+						pairedItem: { item: i },
+					});
+					continue;
 				}
 
 				const platform = this.getNodeParameter('platform', i) as string;
+				const asyncPublish = this.getNodeParameter('asyncPublish', i, true) as boolean;
+				const rednoteBatch = this.getNodeParameter('rednotePostBatchMode', i, true) as boolean;
+				const fallbackMediaUrl = rednoteBatch ? inputMediaUrl(item) : '';
+				const fallbackTitle = rednoteBatch ? inputTitle(item) : '';
 				let endpoint = '';
 				let body: Record<string, unknown> = {};
 
 				if (platform === 'facebook') {
 					const pageId = this.getNodeParameter('pageId', i) as string;
 					const facebookPostMode = this.getNodeParameter('facebookPostMode', i) as string;
-					const text = this.getNodeParameter('text', i, '') as string;
-					const mediaUrls = normalizeMediaUrls(this.getNodeParameter('mediaUrls', i, '') as string);
+					const text = firstString(this.getNodeParameter('text', i, ''), fallbackTitle);
+					const mediaUrls = normalizeMediaUrls(firstString(this.getNodeParameter('mediaUrls', i, ''), fallbackMediaUrl));
 					assertDirectMediaUrls(this.getNode(), i, mediaUrls, 'Media URLs');
-
 					assertAccountId(this.getNode(), i, pageId, 'Facebook Page');
 
 					if (!text && !mediaUrls.length) {
 						throw new NodeOperationError(this.getNode(), 'Facebook posts require Text or Media URLs.', { itemIndex: i });
 					}
-
 					if ((facebookPostMode === 'IMAGE' || facebookPostMode === 'REEL') && !mediaUrls.length) {
+						if (rednoteBatch && this.getNodeParameter('skipMissingPostMedia', i, true) as boolean) {
+							returnData.push({
+								json: {
+									success: false,
+									skipped: true,
+									platform,
+									code: 'POSTIFYS_MEDIA_URL_MISSING',
+									error: 'No serve_url/media URL found for this item.',
+								},
+								pairedItem: { item: i },
+							});
+							continue;
+						}
 						throw new NodeOperationError(this.getNode(), `Media URLs are required for Facebook ${facebookPostMode.toLowerCase()} posts.`, { itemIndex: i });
 					}
 
@@ -869,17 +1326,36 @@ export class Postifys implements INodeType {
 						type: mediaUrls.length ? facebookPostMode : 'FEED',
 						text,
 						mediaUrls,
+						async: asyncPublish,
 					};
+					if (facebookPostMode === 'REEL') {
+						const collaborators = String(this.getNodeParameter('collaborators', i, '') || '').trim();
+						if (collaborators) {
+							body.collaborators = collaborators;
+						}
+					}
 				} else if (platform === 'instagram') {
 					const instagramAccountId = this.getNodeParameter('instagramAccountId', i) as string;
 					const mediaType = this.getNodeParameter('mediaType', i) as string;
-					const text = this.getNodeParameter('text', i, '') as string;
-					const mediaUrls = normalizeMediaUrls(this.getNodeParameter('mediaUrls', i, '') as string);
+					const text = firstString(this.getNodeParameter('text', i, ''), fallbackTitle);
+					const mediaUrls = normalizeMediaUrls(firstString(this.getNodeParameter('mediaUrls', i, ''), fallbackMediaUrl));
 					assertDirectMediaUrls(this.getNode(), i, mediaUrls, 'Media URLs');
-
 					assertAccountId(this.getNode(), i, instagramAccountId, 'Instagram account');
 
 					if (!mediaUrls.length) {
+						if (rednoteBatch && this.getNodeParameter('skipMissingPostMedia', i, true) as boolean) {
+							returnData.push({
+								json: {
+									success: false,
+									skipped: true,
+									platform,
+									code: 'POSTIFYS_MEDIA_URL_MISSING',
+									error: 'No serve_url/media URL found for this item.',
+								},
+								pairedItem: { item: i },
+							});
+							continue;
+						}
 						throw new NodeOperationError(this.getNode(), 'Instagram posts require Media URLs.', { itemIndex: i });
 					}
 
@@ -889,29 +1365,46 @@ export class Postifys implements INodeType {
 						type: mediaType,
 						text,
 						mediaUrls,
+						async: asyncPublish,
 					};
+					if (mediaType === 'REEL') {
+						const collaborators = String(this.getNodeParameter('collaborators', i, '') || '').trim();
+						if (collaborators) {
+							body.collaborators = collaborators;
+						}
+					}
 				} else if (platform === 'youtube') {
 					const channelId = this.getNodeParameter('channelId', i) as string;
-					const title = this.getNodeParameter('title', i, '') as string;
+					const title = firstString(this.getNodeParameter('title', i, ''), fallbackTitle);
 					const description = this.getNodeParameter('description', i, '') as string;
-					const videoUrl = this.getNodeParameter('videoUrl', i, '') as string;
+					const videoUrl = firstString(this.getNodeParameter('videoUrl', i, ''), fallbackMediaUrl);
 					const thumbnailUrl = this.getNodeParameter('thumbnailUrl', i, '') as string;
 					const privacyStatus = this.getNodeParameter('privacyStatus', i, 'private') as string;
 					const tags = this.getNodeParameter('tags', i, '') as string;
 					const categoryId = this.getNodeParameter('categoryId', i, '22') as string;
 					const notifySubscribers = this.getNodeParameter('notifySubscribers', i, false) as boolean;
-
 					assertAccountId(this.getNode(), i, channelId, 'YouTube Channel');
 
-					if (!String(title || '').trim()) {
+					if (!title) {
 						throw new NodeOperationError(this.getNode(), 'YouTube posts require a Title.', { itemIndex: i });
 					}
-
-					if (!String(videoUrl || '').trim()) {
+					if (!videoUrl) {
+						if (rednoteBatch && this.getNodeParameter('skipMissingPostMedia', i, true) as boolean) {
+							returnData.push({
+								json: {
+									success: false,
+									skipped: true,
+									platform,
+									code: 'POSTIFYS_MEDIA_URL_MISSING',
+									error: 'No serve_url/video URL found for this item.',
+								},
+								pairedItem: { item: i },
+							});
+							continue;
+						}
 						throw new NodeOperationError(this.getNode(), 'YouTube posts require a Video URL.', { itemIndex: i });
 					}
-
-					assertDirectMediaUrls(this.getNode(), i, [String(videoUrl).trim()], 'Video URL');
+					assertDirectMediaUrls(this.getNode(), i, [videoUrl], 'Video URL');
 					if (String(thumbnailUrl || '').trim()) {
 						assertDirectMediaUrls(this.getNode(), i, [String(thumbnailUrl).trim()], 'Thumbnail URL');
 					}
@@ -927,26 +1420,36 @@ export class Postifys implements INodeType {
 						tags,
 						categoryId,
 						notifySubscribers,
+						async: asyncPublish,
 					};
 				} else if (platform === 'pinterest') {
 					const pinterestUserId = this.getNodeParameter('pinterestUserId', i) as string;
 					const boardId = this.getNodeParameter('boardId', i) as string;
-					const title = this.getNodeParameter('title', i, '') as string;
+					const title = firstString(this.getNodeParameter('title', i, ''), fallbackTitle);
 					const description = this.getNodeParameter('description', i, '') as string;
 					const link = this.getNodeParameter('link', i, '') as string;
-					const imageUrl = this.getNodeParameter('imageUrl', i, '') as string;
-					const mediaUrls = normalizeMediaUrls(this.getNodeParameter('mediaUrls', i, '') as string);
-					const resolvedImageUrl = String(imageUrl || mediaUrls[0] || '').trim();
-					assertDirectMediaUrls(this.getNode(), i, [resolvedImageUrl], 'Image URL');
-
+					const imageUrl = firstString(this.getNodeParameter('imageUrl', i, ''), fallbackMediaUrl);
+					assertDirectMediaUrls(this.getNode(), i, [imageUrl], 'Image URL');
 					assertAccountId(this.getNode(), i, pinterestUserId, 'Pinterest Account');
 					assertAccountId(this.getNode(), i, boardId, 'Pinterest Board');
 
-					if (!String(title || '').trim()) {
+					if (!title) {
 						throw new NodeOperationError(this.getNode(), 'Pinterest pins require a Title.', { itemIndex: i });
 					}
-
-					if (!resolvedImageUrl) {
+					if (!imageUrl) {
+						if (rednoteBatch && this.getNodeParameter('skipMissingPostMedia', i, true) as boolean) {
+							returnData.push({
+								json: {
+									success: false,
+									skipped: true,
+									platform,
+									code: 'POSTIFYS_MEDIA_URL_MISSING',
+									error: 'No serve_url/image URL found for this item.',
+								},
+								pairedItem: { item: i },
+							});
+							continue;
+						}
 						throw new NodeOperationError(this.getNode(), 'Pinterest pins require an Image URL.', { itemIndex: i });
 					}
 
@@ -957,38 +1460,34 @@ export class Postifys implements INodeType {
 						title,
 						description,
 						link,
-						imageUrl: resolvedImageUrl,
+						imageUrl,
+						async: asyncPublish,
 					};
 				} else if (platform === 'linkedin') {
 					const linkedinUserId = this.getNodeParameter('linkedinUserId', i) as string;
 					const linkedinPostType = this.getNodeParameter('linkedinPostType', i, 'image') as string;
-					const text = this.getNodeParameter('text', i, '') as string;
-					const title = this.getNodeParameter('title', i, '') as string;
+					const text = firstString(this.getNodeParameter('text', i, ''), fallbackTitle);
+					const title = firstString(this.getNodeParameter('title', i, ''), fallbackTitle);
 					const link = this.getNodeParameter('linkedinLink', i, '') as string;
-					const imageUrl = this.getNodeParameter('linkedinImageUrl', i, '') as string;
-					const videoUrl = this.getNodeParameter('linkedinVideoUrl', i, '') as string;
-
+					const imageUrl = firstString(this.getNodeParameter('linkedinImageUrl', i, ''), fallbackMediaUrl);
+					const videoUrl = firstString(this.getNodeParameter('linkedinVideoUrl', i, ''), fallbackMediaUrl);
 					assertAccountId(this.getNode(), i, linkedinUserId, 'LinkedIn Account');
 
-					if (!String(text || '').trim()) {
+					if (!text) {
 						throw new NodeOperationError(this.getNode(), 'LinkedIn posts require Text.', { itemIndex: i });
 					}
-
-					if (linkedinPostType === 'image' && !String(imageUrl || '').trim()) {
+					if (linkedinPostType === 'image' && !imageUrl) {
 						throw new NodeOperationError(this.getNode(), 'LinkedIn image posts require Image URL.', { itemIndex: i });
 					}
-
-					if (linkedinPostType === 'video' && !String(videoUrl || '').trim()) {
+					if (linkedinPostType === 'video' && !videoUrl) {
 						throw new NodeOperationError(this.getNode(), 'LinkedIn video posts require Video URL.', { itemIndex: i });
 					}
-
 					if (linkedinPostType === 'image') {
-						assertDirectMediaUrls(this.getNode(), i, [String(imageUrl).trim()], 'Image URL');
+						assertDirectMediaUrls(this.getNode(), i, [imageUrl], 'Image URL');
 					}
 					if (linkedinPostType === 'video') {
-						assertDirectMediaUrls(this.getNode(), i, [String(videoUrl).trim()], 'Video URL');
+						assertDirectMediaUrls(this.getNode(), i, [videoUrl], 'Video URL');
 					}
-
 					if (linkedinPostType === 'link' && !String(link || '').trim()) {
 						throw new NodeOperationError(this.getNode(), 'LinkedIn link preview posts require Link.', { itemIndex: i });
 					}
@@ -1002,46 +1501,67 @@ export class Postifys implements INodeType {
 						link,
 						imageUrl,
 						videoUrl,
+						async: asyncPublish,
 					};
 				} else if (platform === 'tiktok') {
-					const videoUrl = this.getNodeParameter('videoUrl', i, '') as string;
-					const caption = this.getNodeParameter('caption', i, '') as string;
+					const tiktokAccountId = this.getNodeParameter('tiktokAccountId', i) as string;
+					const videoUrl = firstString(this.getNodeParameter('videoUrl', i, ''), fallbackMediaUrl);
+					const caption = firstString(this.getNodeParameter('caption', i, ''), fallbackTitle);
+					const privacy = this.getNodeParameter('tiktokPrivacy', i, 'PUBLIC_TO_EVERYONE') as string;
+					const disableComment = this.getNodeParameter('disableComment', i, false) as boolean;
+					const disableDuet = this.getNodeParameter('disableDuet', i, false) as boolean;
+					const disableStitch = this.getNodeParameter('disableStitch', i, false) as boolean;
+					assertAccountId(this.getNode(), i, tiktokAccountId, 'TikTok Account');
 
-					if (!String(videoUrl || '').trim()) {
+					if (!videoUrl) {
+						if (rednoteBatch && this.getNodeParameter('skipMissingPostMedia', i, true) as boolean) {
+							returnData.push({
+								json: {
+									success: false,
+									skipped: true,
+									platform,
+									code: 'POSTIFYS_MEDIA_URL_MISSING',
+									error: 'No serve_url/video URL found for this item.',
+								},
+								pairedItem: { item: i },
+							});
+							continue;
+						}
 						throw new NodeOperationError(this.getNode(), 'TikTok posts require a Video URL.', { itemIndex: i });
 					}
-
-					assertDirectMediaUrls(this.getNode(), i, [String(videoUrl).trim()], 'Video URL');
+					assertDirectMediaUrls(this.getNode(), i, [videoUrl], 'Video URL');
 
 					endpoint = '/api/tiktok/post';
 					body = {
+						tiktokAccountId,
 						videoUrl,
 						caption,
+						privacy,
+						disableComment,
+						disableDuet,
+						disableStitch,
+						async: asyncPublish,
 					};
 				} else {
 					throw new NodeOperationError(this.getNode(), `Unsupported platform: ${platform}`, { itemIndex: i });
 				}
 
-				const options: IRequestOptions = {
-					method: 'POST',
-					baseURL,
-					uri: endpoint,
-					body,
-					json: true,
-					timeout: POST_REQUEST_TIMEOUT_MS,
-				};
-
 				const responseData = await this.helpers.requestWithAuthentication.call(
 					this,
 					'postifysApi',
-					options,
-				);
+					{
+						method: 'POST',
+						baseURL,
+						uri: endpoint,
+						body,
+						json: true,
+						timeout: asyncPublish ? POST_REQUEST_TIMEOUT_MS : 20 * 60 * 1000,
+					} as IRequestOptions,
+				) as Record<string, unknown>;
 
 				returnData.push({
-					json: responseData,
-					pairedItem: {
-						item: i,
-					},
+					json: normalizePostifysResult(platform, 'create', responseData),
+					pairedItem: { item: i },
 				});
 			} catch (error) {
 				const parsed = parsePostifysError(error);
@@ -1053,9 +1573,7 @@ export class Postifys implements INodeType {
 							error: parsed.message,
 							code: parsed.code,
 						},
-						pairedItem: {
-							item: i,
-						},
+						pairedItem: { item: i },
 					});
 					continue;
 				}

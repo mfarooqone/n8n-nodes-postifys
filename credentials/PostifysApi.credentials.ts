@@ -30,13 +30,6 @@ export class PostifysApi implements ICredentialType {
 			required: true,
 			description: 'Base URL of your Postifys server.',
 		},
-		{
-			displayName: 'Media Host URL',
-			name: 'mediaHostUrl',
-			type: 'string',
-			default: 'https://rednote.postifys.com',
-			description: 'Base URL used by Media → Upload from URL (temp direct media hosting).',
-		},
 	];
 
 	authenticate = {
