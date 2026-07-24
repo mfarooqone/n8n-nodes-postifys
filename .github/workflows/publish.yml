@@ -1,3 +1,8 @@
+# Publishes n8n-nodes-postifys with npm provenance (required for n8n Creator Portal verification).
+# Setup once: GitHub repo Settings → Secrets → Actions → NPM_TOKEN (npm access token with publish).
+# Then: git tag v0.6.21 && git push origin v0.6.21
+# Or run this workflow manually from the Actions tab.
+
 name: Publish to npm
 
 on:
@@ -11,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+      id-token: write # required for npm provenance / OIDC
     steps:
       - uses: actions/checkout@v4
 
@@ -20,8 +25,12 @@ jobs:
           node-version: '22'
           registry-url: https://registry.npmjs.org
 
-      - run: npm ci
-      - run: npm run build
-      - run: npm publish --access public --provenance
+      - name: Install and test
+        run: |
+          npm ci
+          npm test
+
+      - name: Publish with provenance
+        run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
