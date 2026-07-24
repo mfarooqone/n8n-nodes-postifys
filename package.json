@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-postifys",
-  "version": "0.6.21",
+  "version": "0.6.22",
   "description": "n8n community node for Postifys (postifys.com): publish to Facebook, Instagram, YouTube, Pinterest, LinkedIn, and TikTok via API/n8n.",
   "keywords": [
     "n8n-community-node-package",
@@ -17,7 +17,9 @@
   "license": "MIT",
   "homepage": "https://postifys.com",
   "author": {
-    "name": "Postifys"
+    "name": "Postifys",
+    "email": "agentifyai25@gmail.com",
+    "url": "https://postifys.com"
   },
   "repository": {
     "type": "git",
