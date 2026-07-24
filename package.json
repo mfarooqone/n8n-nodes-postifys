@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-postifys",
-  "version": "0.6.22",
+  "version": "0.6.23",
   "description": "n8n community node for Postifys (postifys.com): publish to Facebook, Instagram, YouTube, Pinterest, LinkedIn, and TikTok via API/n8n.",
   "keywords": [
     "n8n-community-node-package",
@@ -17,10 +17,17 @@
   "license": "MIT",
   "homepage": "https://postifys.com",
   "author": {
-    "name": "Postifys",
-    "email": "agentifyai25@gmail.com",
+    "name": "Muhammad Farooq Iqbal",
+    "email": "mfarooqiqbal143@gmail.com",
     "url": "https://postifys.com"
   },
+  "contributors": [
+    {
+      "name": "Postifys",
+      "email": "agentifyai25@gmail.com",
+      "url": "https://postifys.com"
+    }
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mfarooqone/n8n-nodes-postifys.git"
