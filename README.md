@@ -1,14 +1,31 @@
 # n8n-nodes-postifys
 
-Publish Facebook, Instagram, YouTube, Pinterest, LinkedIn, and TikTok posts from n8n through [Postifys](https://postifys.com).
+Postifys ([postifys.com](https://postifys.com)) is a unified social media publishing API for Facebook, Instagram, YouTube, Pinterest, LinkedIn, and TikTok - via dashboard, REST API, or this n8n community node. It is a publishing API / automation backend, not a consumer content calendar.
 
-**API documentation:** https://postifys.com/api-docs
+**Package:** `n8n-nodes-postifys`  
+**Default server:** `https://postifys.com`
+
+### Quick links
+- Docs: https://postifys.com/docs  
+- API reference: https://postifys.com/api-docs  
+- n8n setup: https://postifys.com/n8n  
+- Downloadable workflow JSON: https://postifys.com/n8n-workflows  
+- Guides: https://postifys.com/guides  
+- Compatibility matrix: https://postifys.com/compatibility-matrix  
+- Pricing: https://postifys.com/pricing ($2 / connected profile / month)
+
+### Honest limitations
+- **TikTok:** creator-inbox upload today; the creator may need to finish publishing in TikTok. Direct Post is not claimed unless separately approved.
+- **LinkedIn:** member profiles only (Company Pages not currently offered).
+- **Pinterest:** image Pins documented; video Pins not claimed in Postifys today.
+
+Install in n8n → **Settings → Community Nodes** → `n8n-nodes-postifys`.
 
 ## Features
 
 - Credential type for your Postifys API key
 - Credential test using your Postifys server
-- **Media → Upload** — upload any image or video URL to Postifys and return a hosted media URL
+- **Media → Upload** - upload any image or video URL to Postifys and return a hosted media URL
 - Dynamic dropdowns for connected Facebook Pages, Instagram accounts, YouTube channels, Pinterest accounts/boards, LinkedIn accounts, and TikTok accounts
 - Auto field mapping for common input fields such as `url`, `media_url`, `serve_url`, `drive_link`, `title`, and `caption`
 - Normalized post output with `status`, `stage`, `isComplete`, `shouldPoll`, `published`, `failed`, and `failureReason`
@@ -23,8 +40,8 @@ Publish Facebook, Instagram, YouTube, Pinterest, LinkedIn, and TikTok posts from
 - Publish Instagram videos/Reels
 - Upload YouTube videos
 - Publish Pinterest image pins
-- Publish LinkedIn member posts
-- Publish TikTok videos
+- Publish LinkedIn **member** posts (Company Pages not currently offered)
+- Upload TikTok videos to the **creator inbox** (Direct Post only if separately approved)
 
 ## Prerequisites
 
@@ -58,9 +75,9 @@ The media upload operation uses **Postifys Server** and calls the Postifys media
 
 Use **two Postifys nodes** in sequence when a platform needs a direct public media URL:
 
-1. **Postifys** — Resource: `Media`, Operation: `Upload`, URL: your image/video URL
+1. **Postifys** - Resource: `Media`, Operation: `Upload`, URL: your image/video URL
    → queues the media on Postifys, waits until it is ready, and outputs `name` and `serve_url`
-2. **Postifys** — Resource: `Post`, pick your platform, set Media/Video/Image URL to `={{ $json.serve_url }}`
+2. **Postifys** - Resource: `Post`, pick your platform, set Media/Video/Image URL to `={{ $json.serve_url }}`
 
 Do **not** pass raw `drive.google.com`, Dropbox, or `rednote.postifys.com/media/temp/...` links directly to post nodes. Upload them with **Media -> Upload** first, then use the returned Postifys `serve_url` (`https://postifys.com/media/tmp/...`).
 
@@ -146,10 +163,13 @@ POST /api/youtube/post
 - Platform: `Pinterest`
 - Pinterest Account: select a connected Pinterest account
 - Pinterest Board: select a board for the chosen account
+- Pinterest Media Type: `Image Pin` or `Video Pin`
 - Title: pin title
 - Description: optional pin description
 - Link: optional destination URL
-- Image URL: `={{ $json.serve_url }}` from the upload node
+- Image URL: `={{ $json.serve_url }}` from the upload node for image pins
+- Video URL: `={{ $json.serve_url }}` from the upload node for video pins
+- Cover Image URL: optional public cover image URL; if blank, Postifys generates a thumbnail from the video
 
 The node calls:
 
@@ -199,8 +219,8 @@ POST /api/tiktok/post
 with `tiktokAccountId` (TikTok `open_id` from `/api/connections`).
 
 Success statuses:
-- `PUBLISH_COMPLETE` — direct feed publish (`video.publish`)
-- `SEND_TO_USER_INBOX` — draft delivered to creator inbox (`video.upload`)
+- `PUBLISH_COMPLETE` - direct feed publish (`video.publish`)
+- `SEND_TO_USER_INBOX` - draft delivered to creator inbox (`video.upload`)
 
 ## Output Shape
 
@@ -256,3 +276,4 @@ npm run release:check
 ## License
 
 MIT
+
