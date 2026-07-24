@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-postifys",
-  "version": "0.6.23",
+  "version": "0.6.24",
   "description": "n8n community node for Postifys (postifys.com): publish to Facebook, Instagram, YouTube, Pinterest, LinkedIn, and TikTok via API/n8n.",
   "keywords": [
     "n8n-community-node-package",
@@ -21,20 +21,13 @@
     "email": "mfarooqiqbal143@gmail.com",
     "url": "https://postifys.com"
   },
-  "contributors": [
-    {
-      "name": "Postifys",
-      "email": "agentifyai25@gmail.com",
-      "url": "https://postifys.com"
-    }
-  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/mfarooqone/n8n-nodes-postifys.git"
   },
   "main": "dist/nodes/Postifys/Postifys.node.js",
   "scripts": {
-    "build": "tsc && mkdir -p dist/nodes/Postifys && cp nodes/Postifys/postifys.svg dist/nodes/Postifys/postifys.svg",
+    "build": "tsc && mkdir -p dist/nodes/Postifys dist/credentials && cp nodes/Postifys/postifys.svg dist/nodes/Postifys/postifys.svg && cp credentials/postifys.svg dist/credentials/postifys.svg",
     "typecheck": "tsc --noEmit",
     "smoke": "npm run build && node scripts/smoke-test.js",
     "test": "npm run smoke",
@@ -56,9 +49,14 @@
     ]
   },
   "devDependencies": {
+    "@n8n/eslint-plugin-community-nodes": "^0.26.0",
     "@types/node": "^22.10.2",
-    "n8n-workflow": "^1.82.0",
-    "typescript": "^5.7.2"
+    "@typescript-eslint/parser": "^8.65.0",
+    "eslint": "^9.29.0",
+    "eslint-plugin-n8n-nodes-base": "^1.16.7",
+    "n8n-workflow": "^2.16.0",
+    "typescript": "^5.7.2",
+    "timers": "file:./lint-stubs/timers"
   },
   "peerDependencies": {
     "n8n-workflow": "*"

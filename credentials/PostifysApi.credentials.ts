@@ -2,12 +2,15 @@ import type {
 	ICredentialTestRequest,
 	ICredentialType,
 	INodeProperties,
+	Icon,
 } from 'n8n-workflow';
 
 export class PostifysApi implements ICredentialType {
 	name = 'postifysApi';
 
 	displayName = 'Postifys API';
+
+	icon: Icon = 'file:postifys.svg';
 
 	documentationUrl = 'https://postifys.com/api-docs';
 
@@ -28,7 +31,7 @@ export class PostifysApi implements ICredentialType {
 			type: 'string',
 			default: 'https://postifys.com',
 			required: true,
-			description: 'Base URL of your Postifys server.',
+			description: 'Base URL of your Postifys server',
 		},
 	];
 

@@ -1,14 +1,15 @@
+import { setTimeout as delay } from 'timers/promises';
 import type {
 	IExecuteFunctions,
+	IHttpRequestOptions,
 	ILoadOptionsFunctions,
 	INode,
 	INodeExecutionData,
 	INodePropertyOptions,
 	INodeType,
 	INodeTypeDescription,
-	IRequestOptions,
 } from 'n8n-workflow';
-import { NodeApiError, NodeOperationError } from 'n8n-workflow';
+import { NodeApiError, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
 type PostifysCredentials = {
 	serverUrl: string;
@@ -60,7 +61,9 @@ const itemField = (item: INodeExecutionData, fieldName: string): unknown => {
 	return (item.json as Record<string, unknown>)[fieldName];
 };
 
-const sleep = async (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = async (ms: number): Promise<void> => {
+	await delay(ms);
+};
 
 const isRednoteTempMediaUrl = (url: string): boolean => REDNOTE_TEMP_MEDIA_PATTERN.test(String(url || '').trim());
 
@@ -117,10 +120,10 @@ const assertAccountId = (
 const getConnections = async (context: ILoadOptionsFunctions): Promise<any[]> => {
 	const credentials = await context.getCredentials('postifysApi') as PostifysCredentials;
 	const baseURL = trimTrailingSlash(credentials.serverUrl);
-	const response = await context.helpers.requestWithAuthentication.call(context, 'postifysApi', {
+	const response = await context.helpers.httpRequestWithAuthentication.call(context, 'postifysApi', {
 		method: 'GET',
 		baseURL,
-		uri: '/api/connections',
+		url: '/api/connections',
 		json: true,
 		timeout: STATUS_REQUEST_TIMEOUT_MS,
 	});
@@ -318,10 +321,10 @@ const queuePostifysMediaUpload = async (
 	filename: string,
 	itemIndex: number,
 ): Promise<Record<string, unknown>> => {
-	const queued = await context.helpers.requestWithAuthentication.call(context, 'postifysApi', {
+	const queued = await context.helpers.httpRequestWithAuthentication.call(context, 'postifysApi', {
 		method: 'POST',
 		baseURL,
-		uri: '/api/media/queue',
+		url: '/api/media/queue',
 		body: {
 			url: sourceUrl,
 			type: 'any',
@@ -352,10 +355,10 @@ const queuePostifysMediaUpload = async (
 		}
 
 		await sleep(MEDIA_STATUS_POLL_INTERVAL_MS);
-		latest = await context.helpers.requestWithAuthentication.call(context, 'postifysApi', {
+		latest = await context.helpers.httpRequestWithAuthentication.call(context, 'postifysApi', {
 			method: 'GET',
 			baseURL,
-			uri: '/api/media/status',
+			url: '/api/media/status',
 			qs: { mediaJobId },
 			json: true,
 			timeout: STATUS_REQUEST_TIMEOUT_MS,
@@ -384,8 +387,9 @@ export class Postifys implements INodeType {
 		defaults: {
 			name: 'Postifys',
 		},
-		inputs: ['main'],
-		outputs: ['main'],
+		inputs: [NodeConnectionTypes.Main],
+		outputs: [NodeConnectionTypes.Main],
+		usableAsTool: true,
 		credentials: [
 			{
 				name: 'postifysApi',
@@ -449,7 +453,7 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: true,
-				description: 'Whether to reuse common input fields like url, media_url, serve_url, source_url, drive_link, path, and file_name',
+				description: 'Whether to reuse common input fields like URL, media_url, serve_url, source_url, drive_link, path, and file_name',
 			},
 			{
 				displayName: 'URL',
@@ -519,10 +523,10 @@ export class Postifys implements INodeType {
 				options: [
 					{ name: 'Facebook', value: 'facebook' },
 					{ name: 'Instagram', value: 'instagram' },
-					{ name: 'YouTube', value: 'youtube' },
-					{ name: 'Pinterest', value: 'pinterest' },
 					{ name: 'LinkedIn', value: 'linkedin' },
+					{ name: 'Pinterest', value: 'pinterest' },
 					{ name: 'TikTok', value: 'tiktok' },
+					{ name: 'YouTube', value: 'youtube' },
 				],
 				default: 'instagram',
 				description: 'Platform associated with the post ID',
@@ -541,10 +545,10 @@ export class Postifys implements INodeType {
 				options: [
 					{ name: 'Facebook', value: 'facebook' },
 					{ name: 'Instagram', value: 'instagram' },
-					{ name: 'YouTube', value: 'youtube' },
-					{ name: 'Pinterest', value: 'pinterest' },
 					{ name: 'LinkedIn', value: 'linkedin' },
+					{ name: 'Pinterest', value: 'pinterest' },
 					{ name: 'TikTok', value: 'tiktok' },
+					{ name: 'YouTube', value: 'youtube' },
 				],
 				default: 'facebook',
 				description: 'Social platform to publish to',
@@ -560,7 +564,7 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: true,
-				description: 'Whether blank post fields should fall back to common input fields like url, media_url, serve_url, title, and caption',
+				description: 'Whether blank post fields should fall back to common input fields like URL, media_url, serve_url, title, and caption',
 			},
 			{
 				displayName: 'Skip Item If Media URL Is Missing',
@@ -577,7 +581,7 @@ export class Postifys implements INodeType {
 				description: 'Whether media post rows without a media URL should be skipped instead of failing',
 			},
 			{
-				displayName: 'Facebook Page',
+				displayName: 'Facebook Page Name or ID',
 				name: 'pageId',
 				type: 'options',
 				typeOptions: { loadOptionsMethod: 'getFacebookPages' },
@@ -590,10 +594,10 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				description: 'Connected Facebook Page to publish to',
+				description: 'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
 			},
 			{
-				displayName: 'Instagram Account',
+				displayName: 'Instagram Account Name or ID',
 				name: 'instagramAccountId',
 				type: 'options',
 				typeOptions: { loadOptionsMethod: 'getInstagramAccounts' },
@@ -606,10 +610,10 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				description: 'Connected Instagram professional account to publish to',
+				description: 'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
 			},
 			{
-				displayName: 'TikTok Account',
+				displayName: 'TikTok Account Name or ID',
 				name: 'tiktokAccountId',
 				type: 'options',
 				typeOptions: { loadOptionsMethod: 'getTikTokAccounts' },
@@ -622,7 +626,7 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				description: 'Connected TikTok creator from Postifys OAuth (connect TikTok at https://postifys.com/app first)',
+				description: 'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
 			},
 			{
 				displayName: 'Facebook Post Mode',
@@ -644,7 +648,7 @@ export class Postifys implements INodeType {
 				description: 'Choose Feed for text or link posts, Image for native photos, or Video / Reel for Facebook Reels',
 			},
 			{
-				displayName: 'YouTube Channel',
+				displayName: 'YouTube Channel Name or ID',
 				name: 'channelId',
 				type: 'options',
 				typeOptions: { loadOptionsMethod: 'getYouTubeChannels' },
@@ -657,10 +661,10 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				description: 'Connected YouTube channel to upload to',
+				description: 'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
 			},
 			{
-				displayName: 'Pinterest Account',
+				displayName: 'Pinterest Account Name or ID',
 				name: 'pinterestUserId',
 				type: 'options',
 				typeOptions: { loadOptionsMethod: 'getPinterestAccounts' },
@@ -673,10 +677,10 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				description: 'Connected Pinterest account to publish from',
+				description: 'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
 			},
 			{
-				displayName: 'Pinterest Board',
+				displayName: 'Pinterest Board Name or ID',
 				name: 'boardId',
 				type: 'options',
 				typeOptions: { loadOptionsMethod: 'getPinterestBoards' },
@@ -689,10 +693,10 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				description: 'Connected Pinterest board to publish to',
+				description: 'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
 			},
 			{
-				displayName: 'LinkedIn Account',
+				displayName: 'LinkedIn Account Name or ID',
 				name: 'linkedinUserId',
 				type: 'options',
 				typeOptions: { loadOptionsMethod: 'getLinkedInAccounts' },
@@ -705,7 +709,7 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				description: 'Connected LinkedIn member account to publish to',
+				description: 'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
 			},
 			{
 				displayName: 'LinkedIn Post Type',
@@ -759,7 +763,7 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				description: 'Optional Instagram usernames to invite as Reel collaborators (up to 3). Comma or newline separated. Leading @ is stripped.',
+				description: 'Optional Instagram usernames to invite as Reel collaborators (up to 3). Comma or newline separated. Leading @ is stripped',
 			},
 			{
 				displayName: 'Collaborators',
@@ -788,7 +792,7 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: true,
-				description: 'Whether to return a postId immediately and let Postifys finish uploading/publishing in the background. Use Get Status later if you need the final result. Turn off to wait until the platform publish completes.',
+				description: 'Whether to return a postId immediately and let Postifys finish uploading/publishing in the background. Use Get Status later if you need the final result. Turn off to wait until the platform publish completes',
 			},
 			{
 				displayName: 'Text',
@@ -832,8 +836,7 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				required: false,
-				description: 'YouTube video title, Pinterest pin title, or optional LinkedIn link title.',
+				description: 'YouTube video title, Pinterest pin title, or optional LinkedIn link title',
 			},
 			{
 				displayName: 'Description',
@@ -848,7 +851,7 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: '',
-				description: 'YouTube video description or Pinterest pin description.',
+				description: 'YouTube video description or Pinterest pin description',
 			},
 			{
 				displayName: 'Link',
@@ -863,7 +866,7 @@ export class Postifys implements INodeType {
 				},
 				default: '',
 				placeholder: 'https://example.com',
-				description: 'Optional destination URL for the Pinterest pin.',
+				description: 'Optional destination URL for the Pinterest pin',
 			},
 			{
 				displayName: 'Link',
@@ -879,7 +882,7 @@ export class Postifys implements INodeType {
 				},
 				default: '',
 				placeholder: 'https://example.com',
-				description: 'URL for a LinkedIn link preview card.',
+				description: 'URL for a LinkedIn link preview card',
 			},
 			{
 				displayName: 'Media URLs',
@@ -910,7 +913,7 @@ export class Postifys implements INodeType {
 				},
 				default: '',
 				placeholder: '={{ $json.serve_url }}',
-				description: 'Use serve_url from Media > Upload.',
+				description: 'Use serve_url from Media > Upload',
 			},
 			{
 				displayName: 'Image URL',
@@ -926,7 +929,7 @@ export class Postifys implements INodeType {
 				},
 				default: '',
 				placeholder: '={{ $json.serve_url }}',
-				description: 'Use serve_url from Media > Upload.',
+				description: 'Use serve_url from Media > Upload',
 			},
 			{
 				displayName: 'Video URL',
@@ -942,7 +945,7 @@ export class Postifys implements INodeType {
 				},
 				default: '',
 				placeholder: '={{ $json.serve_url }}',
-				description: 'Use serve_url from Media > Upload.',
+				description: 'Use serve_url from Media > Upload',
 			},
 			{
 				displayName: 'Video URL',
@@ -957,7 +960,7 @@ export class Postifys implements INodeType {
 				},
 				default: '',
 				placeholder: '={{ $json.serve_url }}',
-				description: 'Use serve_url from Media > Upload.',
+				description: 'Use serve_url from Media > Upload',
 			},
 			{
 				displayName: 'Thumbnail URL',
@@ -972,7 +975,7 @@ export class Postifys implements INodeType {
 				},
 				default: '',
 				placeholder: 'https://example.com/thumbnail.jpg',
-				description: 'Optional public image URL for the YouTube custom thumbnail.',
+				description: 'Optional public image URL for the YouTube custom thumbnail',
 			},
 			{
 				displayName: 'Privacy Status',
@@ -991,7 +994,7 @@ export class Postifys implements INodeType {
 					{ name: 'Public', value: 'public' },
 				],
 				default: 'private',
-				description: 'Visibility for the uploaded YouTube video.',
+				description: 'Visibility for the uploaded YouTube video',
 			},
 			{
 				displayName: 'TikTok Privacy',
@@ -1064,7 +1067,7 @@ export class Postifys implements INodeType {
 				},
 				default: '',
 				placeholder: 'postifys, automation',
-				description: 'Comma-separated YouTube tags.',
+				description: 'Comma-separated YouTube tags',
 			},
 			{
 				displayName: 'Category ID',
@@ -1092,7 +1095,7 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: false,
-				description: 'Whether YouTube should notify channel subscribers.',
+				description: 'Whether YouTube should notify channel subscribers',
 			},
 		],
 	};
@@ -1147,19 +1150,19 @@ export class Postifys implements INodeType {
 					const uri = pinterestUserId
 						? `/api/pinterest/boards?pinterestUserId=${encodeURIComponent(pinterestUserId)}`
 						: '/api/pinterest/boards';
-					const response = await this.helpers.requestWithAuthentication.call(this, 'postifysApi', {
+					const response = await this.helpers.httpRequestWithAuthentication.call(this, 'postifysApi', {
 						method: 'GET',
 						baseURL,
-						uri,
+						url: uri,
 						json: true,
 						timeout: STATUS_REQUEST_TIMEOUT_MS,
 					});
 					const boards = Array.isArray(response.boards) ? response.boards : [];
 					if (!boards.length) {
 						return [{
-							name: 'No Pinterest boards found. Connect Pinterest in Postifys.',
+							name: 'No Pinterest Boards Found. Connect Pinterest In Postifys',
 							value: '',
-							description: 'Open Postifys, connect Pinterest, then reload this dropdown.',
+							description: 'Open Postifys, connect Pinterest, then reload this dropdown',
 						}];
 					}
 					return boards.map((board: { id: string; name?: string }) => ({
@@ -1269,10 +1272,10 @@ export class Postifys implements INodeType {
 						throw new NodeOperationError(this.getNode(), 'Post ID is required.', { itemIndex: i });
 					}
 					const separator = statusPath.includes('?') ? '&' : '?';
-					const responseData = await this.helpers.requestWithAuthentication.call(this, 'postifysApi', {
+					const responseData = await this.helpers.httpRequestWithAuthentication.call(this, 'postifysApi', {
 						method: 'GET',
 						baseURL,
-						uri: `${statusPath}${separator}postId=${encodeURIComponent(postId)}&platform=${encodeURIComponent(platform)}`,
+						url: `${statusPath}${separator}postId=${encodeURIComponent(postId)}&platform=${encodeURIComponent(platform)}`,
 						json: true,
 						timeout: STATUS_REQUEST_TIMEOUT_MS,
 					}) as Record<string, unknown>;
@@ -1546,17 +1549,17 @@ export class Postifys implements INodeType {
 					throw new NodeOperationError(this.getNode(), `Unsupported platform: ${platform}`, { itemIndex: i });
 				}
 
-				const responseData = await this.helpers.requestWithAuthentication.call(
+				const responseData = await this.helpers.httpRequestWithAuthentication.call(
 					this,
 					'postifysApi',
 					{
 						method: 'POST',
 						baseURL,
-						uri: endpoint,
+						url: endpoint,
 						body,
 						json: true,
 						timeout: asyncPublish ? POST_REQUEST_TIMEOUT_MS : 20 * 60 * 1000,
-					} as IRequestOptions,
+					} as IHttpRequestOptions,
 				) as Record<string, unknown>;
 
 				returnData.push({
