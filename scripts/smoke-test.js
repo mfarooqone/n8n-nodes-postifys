@@ -22,9 +22,16 @@ assert.ok(mediaOperationValues.includes('uploadFromUrl'), 'media upload operatio
 assert.ok(mediaOperationValues.includes('ensureMediaUrl'), 'legacy ensure media operation is registered');
 assert.equal(mediaOperation.default, 'uploadFromUrl');
 assert.equal(property('tiktokAccountId').typeOptions.loadOptionsMethod, 'getTikTokAccounts');
-assert.equal(property('tiktokPostMode').default, 'direct');
+assert.equal(property('tiktokPostMode').default, 'inbox');
 assert.deepEqual(property('tiktokPostMode').options.map((item) => item.value), ['direct', 'inbox']);
-assert.equal(property('tiktokDirectPostConsent'), undefined);
+assert.equal(property('tiktokPrivacy').default, '');
+assert.equal(property('tiktokPrivacy').typeOptions.loadOptionsMethod, 'getTikTokPrivacyLevels');
+assert.equal(property('allowComment').default, false);
+assert.equal(property('allowDuet').default, false);
+assert.equal(property('allowStitch').default, false);
+assert.equal(property('contentDisclosure').default, false);
+assert.deepEqual(property('commercialContentTypes').default, []);
+assert.equal(property('tiktokDirectPostConsent').default, false);
 assert.equal(property('rednoteBatchMode').default, true);
 assert.equal(property('rednoteBatchMode').displayName, 'Auto Map Input Fields');
 assert.equal(property('rednotePostBatchMode').default, true);
@@ -32,6 +39,7 @@ assert.equal(property('rednotePostBatchMode').displayName, 'Auto Map Input Field
 assert.equal(property('asyncPublish').default, true);
 assert.equal(property('statusPath').default, '/api/posts/status');
 assert.equal(typeof node.methods.loadOptions.getTikTokAccounts, 'function');
+assert.equal(typeof node.methods.loadOptions.getTikTokPrivacyLevels, 'function');
 
 assert.deepEqual(
 	__postifysTestUtils.normalizeMediaUrls('https://a.test/1.mp4, https://a.test/2.mp4\nhttps://a.test/3.mp4'),

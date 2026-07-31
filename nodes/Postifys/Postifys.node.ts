@@ -130,6 +130,21 @@ const getConnections = async (context: ILoadOptionsFunctions): Promise<any[]> =>
 	return Array.isArray(response.connections) ? response.connections : [];
 };
 
+const getTikTokCreatorInfo = async (context: ILoadOptionsFunctions): Promise<any> => {
+	const credentials = await context.getCredentials('postifysApi') as PostifysCredentials;
+	const baseURL = trimTrailingSlash(credentials.serverUrl);
+	const accountId = String(context.getNodeParameter('tiktokAccountId', 0) || '').trim();
+	if (!accountId) throw new Error('Select a TikTok account first.');
+	const response = await context.helpers.httpRequestWithAuthentication.call(context, 'postifysApi', {
+		method: 'GET',
+		baseURL,
+		url: `/api/tiktok/creator-info?tiktokAccountId=${encodeURIComponent(accountId)}`,
+		json: true,
+		timeout: STATUS_REQUEST_TIMEOUT_MS,
+	});
+	return response.creator || {};
+};
+
 const connectionOptions = async (
 	context: ILoadOptionsFunctions,
 	platform: string,
@@ -651,7 +666,7 @@ export class Postifys implements INodeType {
 						description: 'Upload to the TikTok inbox for further editing and manual publishing',
 					},
 				],
-				default: 'direct',
+				default: 'inbox',
 				description: 'Choose how this individual video is delivered to TikTok',
 			},
 			{
@@ -1029,25 +1044,103 @@ export class Postifys implements INodeType {
 				displayName: 'TikTok Privacy',
 				name: 'tiktokPrivacy',
 				type: 'options',
+				typeOptions: { loadOptionsMethod: 'getTikTokPrivacyLevels' },
+				required: true,
 				displayOptions: {
 					show: {
 						resource: ['post'],
 						operation: ['create'],
 						platform: ['tiktok'],
 						tiktokPostMode: ['direct'],
+					},
+				},
+				default: '',
+				description: 'Reload after selecting the account. Options come from TikTok creator_info and no visibility is selected automatically.',
+			},
+			{
+				displayName: 'Allow Comments',
+				name: 'allowComment',
+				type: 'boolean',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['tiktok'],
+						tiktokPostMode: ['direct'],
+					},
+				},
+				default: false,
+				description: 'Off by default. Postifys rejects this selection if TikTok has disabled comments for the selected creator.',
+			},
+			{
+				displayName: 'Allow Duet',
+				name: 'allowDuet',
+				type: 'boolean',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['tiktok'],
+						tiktokPostMode: ['direct'],
+					},
+				},
+				default: false,
+				description: 'Off by default. Postifys rejects this selection if TikTok has disabled Duet for the selected creator.',
+			},
+			{
+				displayName: 'Allow Stitch',
+				name: 'allowStitch',
+				type: 'boolean',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['tiktok'],
+						tiktokPostMode: ['direct'],
+					},
+				},
+				default: false,
+				description: 'Off by default. Postifys rejects this selection if TikTok has disabled Stitch for the selected creator.',
+			},
+			{
+				displayName: 'Content Disclosure',
+				name: 'contentDisclosure',
+				type: 'boolean',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['tiktok'],
+						tiktokPostMode: ['direct'],
+					},
+				},
+				default: false,
+				description: 'Turn on when the video promotes yourself, a brand, product, or service',
+			},
+			{
+				displayName: 'Commercial Content Type',
+				name: 'commercialContentTypes',
+				type: 'multiOptions',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['tiktok'],
+						tiktokPostMode: ['direct'],
+						contentDisclosure: [true],
 					},
 				},
 				options: [
-					{ name: 'Public to Everyone', value: 'PUBLIC_TO_EVERYONE' },
-					{ name: 'Mutual Follow Friends', value: 'MUTUAL_FOLLOW_FRIENDS' },
-					{ name: 'Self Only', value: 'SELF_ONLY' },
+					{ name: 'Your Brand', value: 'brand_organic', description: "Promotes the creator's own business; TikTok labels it Promotional content" },
+					{ name: 'Branded Content', value: 'brand_content', description: 'Paid partnership or promotion for a third party; TikTok labels it Paid partnership' },
 				],
-				default: 'PUBLIC_TO_EVERYONE',
-				description: 'Used for Direct Post (video.publish). With video.upload (inbox draft), TikTok delivers a draft to the creator inbox and final visibility is set in the TikTok app.',
+				default: [],
+				required: true,
+				description: 'Select at least one disclosure type',
 			},
 			{
-				displayName: 'Disable TikTok Comments',
-				name: 'disableComment',
+				displayName: 'AI-Generated Content',
+				name: 'isAigc',
 				type: 'boolean',
 				displayOptions: {
 					show: {
@@ -1058,10 +1151,26 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: false,
+				description: 'Whether TikTok should label this video as AI-generated',
 			},
 			{
-				displayName: 'Disable TikTok Duet',
-				name: 'disableDuet',
+				displayName: 'Review Before Publishing',
+				name: 'tiktokReviewNotice',
+				type: 'notice',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['tiktok'],
+						tiktokPostMode: ['direct'],
+					},
+				},
+				default: '',
+				description: 'Review the selected creator, Video URL, editable caption, privacy, interaction settings, and content disclosure above. TikTok may take a few minutes to process the video after submission.',
+			},
+			{
+				displayName: "By Posting, You Agree to TikTok's <a href=\"https://www.tiktok.com/legal/page/global/music-usage-confirmation/en\" target=\"_blank\">Music Usage Confirmation</a>",
+				name: 'tiktokDirectPostConsent',
 				type: 'boolean',
 				displayOptions: {
 					show: {
@@ -1072,20 +1181,8 @@ export class Postifys implements INodeType {
 					},
 				},
 				default: false,
-			},
-			{
-				displayName: 'Disable TikTok Stitch',
-				name: 'disableStitch',
-				type: 'boolean',
-				displayOptions: {
-					show: {
-						resource: ['post'],
-						operation: ['create'],
-						platform: ['tiktok'],
-						tiktokPostMode: ['direct'],
-					},
-				},
-				default: false,
+				required: true,
+				description: 'You must review this individual post and explicitly confirm before Direct Post can run',
 			},
 			{
 				displayName: 'Tags',
@@ -1225,6 +1322,28 @@ export class Postifys implements INodeType {
 					'Open https://postifys.com/app, click TikTok under Add Account, authorize, then reload this dropdown.',
 					(account) => account.username ? `@${account.username}` : account.name || account.id,
 				);
+			},
+
+			async getTikTokPrivacyLevels(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				try {
+					const creator = await getTikTokCreatorInfo(this);
+					const labels: Record<string, string> = {
+						PUBLIC_TO_EVERYONE: 'Public to Everyone',
+						MUTUAL_FOLLOW_FRIENDS: 'Mutual Follow Friends',
+						FOLLOWER_OF_CREATOR: 'Followers of Creator',
+						SELF_ONLY: 'Self Only',
+					};
+					const levels = Array.isArray(creator.privacyLevelOptions) ? creator.privacyLevelOptions : [];
+					if (!levels.length) {
+						return [{ name: 'No Privacy Options Available From TikTok', value: '' }];
+					}
+					return levels.map((level: string) => ({
+						name: labels[level] || level,
+						value: level,
+					}));
+				} catch (error) {
+					return connectionLoadErrorOption(error);
+				}
 			},
 		},
 	};
@@ -1544,11 +1663,16 @@ export class Postifys implements INodeType {
 					const postMode = this.getNodeParameter('tiktokPostMode', i, 'direct') as string;
 					const videoUrl = firstString(this.getNodeParameter('videoUrl', i, ''), fallbackMediaUrl);
 					const caption = firstString(this.getNodeParameter('caption', i, ''), fallbackTitle);
-					const privacy = this.getNodeParameter('tiktokPrivacy', i, 'PUBLIC_TO_EVERYONE') as string;
-					const disableComment = this.getNodeParameter('disableComment', i, false) as boolean;
-					const disableDuet = this.getNodeParameter('disableDuet', i, false) as boolean;
-					const disableStitch = this.getNodeParameter('disableStitch', i, false) as boolean;
-					const consent = postMode === 'direct';
+					const privacy = this.getNodeParameter('tiktokPrivacy', i, '') as string;
+					const allowComment = this.getNodeParameter('allowComment', i, false) as boolean;
+					const allowDuet = this.getNodeParameter('allowDuet', i, false) as boolean;
+					const allowStitch = this.getNodeParameter('allowStitch', i, false) as boolean;
+					const contentDisclosure = this.getNodeParameter('contentDisclosure', i, false) as boolean;
+					const commercialContentTypes = this.getNodeParameter('commercialContentTypes', i, []) as string[];
+					const isAigc = this.getNodeParameter('isAigc', i, false) as boolean;
+					const consent = postMode === 'direct'
+						? this.getNodeParameter('tiktokDirectPostConsent', i, false) as boolean
+						: false;
 					assertAccountId(this.getNode(), i, tiktokAccountId, 'TikTok Account');
 
 					if (!videoUrl) {
@@ -1568,6 +1692,18 @@ export class Postifys implements INodeType {
 						throw new NodeOperationError(this.getNode(), 'TikTok posts require a Video URL.', { itemIndex: i });
 					}
 					assertDirectMediaUrls(this.getNode(), i, [videoUrl], 'Video URL');
+					if (postMode === 'direct' && !privacy) {
+						throw new NodeOperationError(this.getNode(), 'Select TikTok Privacy after loading the creator options.', { itemIndex: i });
+					}
+					if (postMode === 'direct' && !consent) {
+						throw new NodeOperationError(this.getNode(), "Confirm TikTok's Music Usage Confirmation before Direct Post.", { itemIndex: i });
+					}
+					if (postMode === 'direct' && contentDisclosure && !commercialContentTypes.length) {
+						throw new NodeOperationError(this.getNode(), 'Select Your Brand, Branded Content, or both.', { itemIndex: i });
+					}
+					if (postMode === 'direct' && commercialContentTypes.includes('brand_content') && privacy === 'SELF_ONLY') {
+						throw new NodeOperationError(this.getNode(), 'Branded Content cannot use Self Only privacy.', { itemIndex: i });
+					}
 
 					endpoint = '/api/tiktok/post';
 					body = {
@@ -1575,11 +1711,15 @@ export class Postifys implements INodeType {
 						videoUrl,
 						caption,
 						privacy,
-						disableComment,
-						disableDuet,
-						disableStitch,
+						disableComment: !allowComment,
+						disableDuet: !allowDuet,
+						disableStitch: !allowStitch,
+						brandOrganicToggle: contentDisclosure && commercialContentTypes.includes('brand_organic'),
+						brandContentToggle: contentDisclosure && commercialContentTypes.includes('brand_content'),
+						isAigc,
 						postMode,
 						consent,
+						musicUsageConfirmed: consent,
 						async: asyncPublish,
 					};
 				} else {
