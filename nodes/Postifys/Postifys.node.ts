@@ -629,6 +629,32 @@ export class Postifys implements INodeType {
 				description: 'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
 			},
 			{
+				displayName: 'TikTok Publishing Method',
+				name: 'tiktokPostMode',
+				type: 'options',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['tiktok'],
+					},
+				},
+				options: [
+					{
+						name: 'Direct Post',
+						value: 'direct',
+						description: 'Publish directly to the selected TikTok profile',
+					},
+					{
+						name: 'Send as Draft',
+						value: 'inbox',
+						description: 'Upload to the TikTok inbox for further editing and manual publishing',
+					},
+				],
+				default: 'direct',
+				description: 'Choose how this individual video is delivered to TikTok',
+			},
+			{
 				displayName: 'Facebook Post Mode',
 				name: 'facebookPostMode',
 				type: 'options',
@@ -643,9 +669,10 @@ export class Postifys implements INodeType {
 					{ name: 'Feed (Text / Link)', value: 'FEED' },
 					{ name: 'Image', value: 'IMAGE' },
 					{ name: 'Video / Reel', value: 'REEL' },
+					{ name: 'Story', value: 'STORIES' },
 				],
 				default: 'REEL',
-				description: 'Choose Feed for text or link posts, Image for native photos, or Video / Reel for Facebook Reels',
+				description: 'Choose Feed for text or link posts, Image for native photos, Video / Reel for Facebook Reels, or Story for Page Stories (plain media; requires META_STORIES_ENABLED on Postifys)',
 			},
 			{
 				displayName: 'YouTube Channel Name or ID',
@@ -745,9 +772,10 @@ export class Postifys implements INodeType {
 				options: [
 					{ name: 'Image', value: 'IMAGE' },
 					{ name: 'Video / Reel', value: 'REEL' },
+					{ name: 'Story', value: 'STORIES' },
 				],
 				default: 'IMAGE',
-				description: 'Choose Image for photo posts or Video / Reel for Instagram Reels',
+				description: 'Choose Image for photo posts, Video / Reel for Instagram Reels, or Story for Instagram Stories (plain media; caption ignored; requires META_STORIES_ENABLED on Postifys)',
 			},
 			{
 				displayName: 'Collaborators',
@@ -819,6 +847,7 @@ export class Postifys implements INodeType {
 						resource: ['post'],
 						operation: ['create'],
 						platform: ['tiktok'],
+						tiktokPostMode: ['direct'],
 					},
 				},
 				default: '',
@@ -1005,6 +1034,7 @@ export class Postifys implements INodeType {
 						resource: ['post'],
 						operation: ['create'],
 						platform: ['tiktok'],
+						tiktokPostMode: ['direct'],
 					},
 				},
 				options: [
@@ -1024,6 +1054,7 @@ export class Postifys implements INodeType {
 						resource: ['post'],
 						operation: ['create'],
 						platform: ['tiktok'],
+						tiktokPostMode: ['direct'],
 					},
 				},
 				default: false,
@@ -1037,6 +1068,7 @@ export class Postifys implements INodeType {
 						resource: ['post'],
 						operation: ['create'],
 						platform: ['tiktok'],
+						tiktokPostMode: ['direct'],
 					},
 				},
 				default: false,
@@ -1050,9 +1082,25 @@ export class Postifys implements INodeType {
 						resource: ['post'],
 						operation: ['create'],
 						platform: ['tiktok'],
+						tiktokPostMode: ['direct'],
 					},
 				},
 				default: false,
+			},
+			{
+				displayName: 'I Confirm This Direct Post',
+				name: 'tiktokDirectPostConsent',
+				type: 'boolean',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+						platform: ['tiktok'],
+						tiktokPostMode: ['direct'],
+					},
+				},
+				default: false,
+				description: 'Confirm that you reviewed the selected creator, caption, privacy, and interaction settings and want to publish now',
 			},
 			{
 				displayName: 'Tags',
@@ -1306,7 +1354,7 @@ export class Postifys implements INodeType {
 					if (!text && !mediaUrls.length) {
 						throw new NodeOperationError(this.getNode(), 'Facebook posts require Text or Media URLs.', { itemIndex: i });
 					}
-					if ((facebookPostMode === 'IMAGE' || facebookPostMode === 'REEL') && !mediaUrls.length) {
+					if ((facebookPostMode === 'IMAGE' || facebookPostMode === 'REEL' || facebookPostMode === 'STORIES') && !mediaUrls.length) {
 						if (rednoteBatch && this.getNodeParameter('skipMissingPostMedia', i, true) as boolean) {
 							returnData.push({
 								json: {
@@ -1508,13 +1556,25 @@ export class Postifys implements INodeType {
 					};
 				} else if (platform === 'tiktok') {
 					const tiktokAccountId = this.getNodeParameter('tiktokAccountId', i) as string;
+					const postMode = this.getNodeParameter('tiktokPostMode', i, 'direct') as string;
 					const videoUrl = firstString(this.getNodeParameter('videoUrl', i, ''), fallbackMediaUrl);
 					const caption = firstString(this.getNodeParameter('caption', i, ''), fallbackTitle);
 					const privacy = this.getNodeParameter('tiktokPrivacy', i, 'PUBLIC_TO_EVERYONE') as string;
 					const disableComment = this.getNodeParameter('disableComment', i, false) as boolean;
 					const disableDuet = this.getNodeParameter('disableDuet', i, false) as boolean;
 					const disableStitch = this.getNodeParameter('disableStitch', i, false) as boolean;
+					const consent = postMode === 'direct'
+						? this.getNodeParameter('tiktokDirectPostConsent', i, false) as boolean
+						: false;
 					assertAccountId(this.getNode(), i, tiktokAccountId, 'TikTok Account');
+
+					if (postMode === 'direct' && !consent) {
+						throw new NodeOperationError(
+							this.getNode(),
+							'Enable "I Confirm This Direct Post" after reviewing the TikTok creator and post settings.',
+							{ itemIndex: i },
+						);
+					}
 
 					if (!videoUrl) {
 						if (rednoteBatch && this.getNodeParameter('skipMissingPostMedia', i, true) as boolean) {
@@ -1543,6 +1603,8 @@ export class Postifys implements INodeType {
 						disableComment,
 						disableDuet,
 						disableStitch,
+						postMode,
+						consent,
 						async: asyncPublish,
 					};
 				} else {

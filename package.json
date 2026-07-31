@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-postifys",
-  "version": "0.6.24",
+  "version": "0.6.26",
   "description": "n8n community node for Postifys (postifys.com): publish to Facebook, Instagram, YouTube, Pinterest, LinkedIn, and TikTok via API/n8n.",
   "keywords": [
     "n8n-community-node-package",
