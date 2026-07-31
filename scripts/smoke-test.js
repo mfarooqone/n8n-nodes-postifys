@@ -24,7 +24,7 @@ assert.equal(mediaOperation.default, 'uploadFromUrl');
 assert.equal(property('tiktokAccountId').typeOptions.loadOptionsMethod, 'getTikTokAccounts');
 assert.equal(property('tiktokPostMode').default, 'direct');
 assert.deepEqual(property('tiktokPostMode').options.map((item) => item.value), ['direct', 'inbox']);
-assert.equal(property('tiktokDirectPostConsent').default, false);
+assert.equal(property('tiktokDirectPostConsent'), undefined);
 assert.equal(property('rednoteBatchMode').default, true);
 assert.equal(property('rednoteBatchMode').displayName, 'Auto Map Input Fields');
 assert.equal(property('rednotePostBatchMode').default, true);

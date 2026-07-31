@@ -1088,21 +1088,6 @@ export class Postifys implements INodeType {
 				default: false,
 			},
 			{
-				displayName: 'I Confirm This Direct Post',
-				name: 'tiktokDirectPostConsent',
-				type: 'boolean',
-				displayOptions: {
-					show: {
-						resource: ['post'],
-						operation: ['create'],
-						platform: ['tiktok'],
-						tiktokPostMode: ['direct'],
-					},
-				},
-				default: false,
-				description: 'Confirm that you reviewed the selected creator, caption, privacy, and interaction settings and want to publish now',
-			},
-			{
 				displayName: 'Tags',
 				name: 'tags',
 				type: 'string',
@@ -1563,18 +1548,8 @@ export class Postifys implements INodeType {
 					const disableComment = this.getNodeParameter('disableComment', i, false) as boolean;
 					const disableDuet = this.getNodeParameter('disableDuet', i, false) as boolean;
 					const disableStitch = this.getNodeParameter('disableStitch', i, false) as boolean;
-					const consent = postMode === 'direct'
-						? this.getNodeParameter('tiktokDirectPostConsent', i, false) as boolean
-						: false;
+					const consent = postMode === 'direct';
 					assertAccountId(this.getNode(), i, tiktokAccountId, 'TikTok Account');
-
-					if (postMode === 'direct' && !consent) {
-						throw new NodeOperationError(
-							this.getNode(),
-							'Enable "I Confirm This Direct Post" after reviewing the TikTok creator and post settings.',
-							{ itemIndex: i },
-						);
-					}
 
 					if (!videoUrl) {
 						if (rednoteBatch && this.getNodeParameter('skipMissingPostMedia', i, true) as boolean) {

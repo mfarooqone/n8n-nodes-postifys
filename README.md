@@ -209,7 +209,7 @@ If you connect multiple Pinterest accounts in Postifys, choose the account first
    - TikTok Publishing Method: choose `Direct Post` or `Send as Draft` for each item
    - Caption: optional caption text
    - Video URL: `={{ $json.serve_url }}` from the upload node
-   - Direct Post: choose privacy and interaction settings, then enable **I Confirm This Direct Post**
+   - Direct Post: choose privacy and interaction settings; selecting this method records the explicit Direct Post choice
    - Send as Draft: Postifys uploads the video to the TikTok inbox; the creator finishes editing and publishing in TikTok
 
 The node calls:
@@ -219,7 +219,8 @@ POST /api/tiktok/post
 ```
 
 with `tiktokAccountId` (TikTok `open_id` from `/api/connections`) and
-`postMode` (`direct` or `inbox`). Direct Post also sends `consent: true`.
+`postMode` (`direct` or `inbox`). Selecting Direct Post automatically sends
+`consent: true`; Draft sends `consent: false`.
 
 Success statuses:
 - `PUBLISH_COMPLETE` - direct feed publish (`video.publish`)
