@@ -22,7 +22,7 @@ assert.ok(mediaOperationValues.includes('uploadFromUrl'), 'media upload operatio
 assert.ok(mediaOperationValues.includes('ensureMediaUrl'), 'legacy ensure media operation is registered');
 assert.equal(mediaOperation.default, 'uploadFromUrl');
 assert.equal(property('tiktokAccountId').typeOptions.loadOptionsMethod, 'getTikTokAccounts');
-assert.equal(property('tiktokPostMode').default, 'inbox');
+assert.equal(property('tiktokPostMode').default, 'direct');
 assert.deepEqual(property('tiktokPostMode').options.map((item) => item.value), ['direct', 'inbox']);
 assert.equal(property('tiktokPrivacy').default, '');
 assert.equal(property('tiktokPrivacy').typeOptions.loadOptionsMethod, 'getTikTokPrivacyLevels');

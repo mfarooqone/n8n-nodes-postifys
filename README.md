@@ -15,7 +15,7 @@ Postifys ([postifys.com](https://postifys.com)) is a unified social media publis
 - Pricing: https://postifys.com/pricing ($2 / connected profile / month)
 
 ### Honest limitations
-- **TikTok:** creator-inbox upload today; the creator may need to finish publishing in TikTok. Direct Post is not claimed unless separately approved.
+- **TikTok:** approved Direct Post for automatic publishing, plus optional Draft Upload when the creator wants to finish editing in TikTok.
 - **LinkedIn:** member profiles only (Company Pages not currently offered).
 - **Pinterest:** image Pins documented; video Pins not claimed in Postifys today.
 

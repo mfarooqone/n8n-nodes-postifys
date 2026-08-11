@@ -666,8 +666,8 @@ export class Postifys implements INodeType {
 						description: 'Upload to the TikTok inbox for further editing and manual publishing',
 					},
 				],
-				default: 'inbox',
-				description: 'Choose how this individual video is delivered to TikTok',
+				default: 'direct',
+				description: 'Direct Post publishes automatically; Send as Draft requires the creator to finish in TikTok',
 			},
 			{
 				displayName: 'Facebook Post Mode',
