@@ -21,6 +21,10 @@ Postifys ([postifys.com](https://postifys.com)) is a unified social media publis
 
 Install in n8n → **Settings → Community Nodes** → `n8n-nodes-postifys`.
 
+## What's new in 0.7.0
+
+- New optional **Idempotency Key** field on publish operations. Retrying the same key and payload replays the original result instead of creating a duplicate post (sent as the `Idempotency-Key` header; line breaks are rejected).
+
 ## Features
 
 - Credential type for your Postifys API key
