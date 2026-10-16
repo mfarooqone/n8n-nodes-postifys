@@ -32,6 +32,7 @@ const POST_REQUEST_TIMEOUT_MS = 60 * 1000;
 const MEDIA_UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 const STATUS_REQUEST_TIMEOUT_MS = 2 * 60 * 1000;
 const MEDIA_STATUS_POLL_INTERVAL_MS = 3 * 1000;
+const TRANSIENT_REQUEST_BACKOFF_MS = [5_000, 15_000, 45_000];
 
 const BLOCKED_DIRECT_URL_PATTERNS = /drive\.google\.com|dropbox\.com|dropboxusercontent\.com/i;
 const REDNOTE_TEMP_MEDIA_PATTERN = /^https?:\/\/rednote\.postifys\.com\/media\/temp\//i;
@@ -65,6 +66,13 @@ const sleep = async (ms: number): Promise<void> => {
 	await delay(ms);
 };
 
+const publishIdempotencyHeaders = (value: unknown): Record<string, string> => {
+	const key = String(value || '').trim();
+	if (!key) return {};
+	if (/\r|\n/.test(key)) throw new Error('Idempotency Key cannot contain line breaks.');
+	return { 'Idempotency-Key': key };
+};
+
 const isRednoteTempMediaUrl = (url: string): boolean => REDNOTE_TEMP_MEDIA_PATTERN.test(String(url || '').trim());
 
 const parsePostifysError = (error: unknown) => {
@@ -74,6 +82,80 @@ const parsePostifysError = (error: unknown) => {
 	const code = body.code || (statusCode ? `HTTP_${statusCode}` : 'POSTIFYS_REQUEST_FAILED');
 	const message = body.error || body.message || apiError.message || 'Postifys request failed.';
 	return { message, code };
+};
+
+const transientNetworkCodes = new Set([
+	'EAI_AGAIN',
+	'ENOTFOUND',
+	'ETIMEDOUT',
+	'ECONNRESET',
+	'ECONNREFUSED',
+	'EPIPE',
+	'UND_ERR_CONNECT_TIMEOUT',
+	'UND_ERR_HEADERS_TIMEOUT',
+	'UND_ERR_BODY_TIMEOUT',
+]);
+
+const transientHttpStatuses = new Set([429, 502, 503, 504]);
+
+const errorCode = (error: unknown): string => {
+	const err = error as {
+		code?: string;
+		cause?: { code?: string };
+		error?: { code?: string };
+	};
+	return String(err.code || err.cause?.code || err.error?.code || '').trim();
+};
+
+const errorStatusCode = (error: unknown): number => {
+	const err = error as {
+		statusCode?: number;
+		httpCode?: number;
+		response?: { statusCode?: number };
+	};
+	return Number(err.response?.statusCode || err.statusCode || err.httpCode || 0);
+};
+
+const isTransientPostifysRequestError = (error: unknown): boolean => {
+	const code = errorCode(error);
+	if (code && transientNetworkCodes.has(code)) return true;
+	const statusCode = errorStatusCode(error);
+	return transientHttpStatuses.has(statusCode);
+};
+
+const postifysTransientLabel = (error: unknown): string => {
+	const code = errorCode(error);
+	if (code) return code;
+	const statusCode = errorStatusCode(error);
+	if (statusCode) return `HTTP_${statusCode}`;
+	return 'TRANSIENT_REQUEST_ERROR';
+};
+
+const requestPostifysWithRetry = async (
+	context: IExecuteFunctions,
+	options: IHttpRequestOptions,
+): Promise<Record<string, unknown>> => {
+	let lastError: unknown;
+	for (let attempt = 0; attempt <= TRANSIENT_REQUEST_BACKOFF_MS.length; attempt++) {
+		try {
+			return await context.helpers.httpRequestWithAuthentication.call(
+				context,
+				'postifysApi',
+				options,
+			) as Record<string, unknown>;
+		} catch (error) {
+			lastError = error;
+			if (!isTransientPostifysRequestError(error) || attempt >= TRANSIENT_REQUEST_BACKOFF_MS.length) {
+				throw error;
+			}
+			const waitMs = TRANSIENT_REQUEST_BACKOFF_MS[attempt];
+			console.warn(
+				`Postifys request transient failure (${postifysTransientLabel(error)}); retrying attempt ${attempt + 2}/${TRANSIENT_REQUEST_BACKOFF_MS.length + 1} after ${Math.round(waitMs / 1000)}s`,
+			);
+			await sleep(waitMs);
+		}
+	}
+	throw lastError;
 };
 
 const connectionLoadErrorOption = (error: unknown): INodePropertyOptions[] => {
@@ -336,7 +418,7 @@ const queuePostifysMediaUpload = async (
 	filename: string,
 	itemIndex: number,
 ): Promise<Record<string, unknown>> => {
-	const queued = await context.helpers.httpRequestWithAuthentication.call(context, 'postifysApi', {
+	const queued = await requestPostifysWithRetry(context, {
 		method: 'POST',
 		baseURL,
 		url: '/api/media/queue',
@@ -347,7 +429,7 @@ const queuePostifysMediaUpload = async (
 		},
 		json: true,
 		timeout: STATUS_REQUEST_TIMEOUT_MS,
-	}) as Record<string, unknown>;
+	});
 
 	const mediaJobId = firstString(queued.mediaJobId, queued.jobId, queued.id);
 	if (!mediaJobId) {
@@ -370,14 +452,14 @@ const queuePostifysMediaUpload = async (
 		}
 
 		await sleep(MEDIA_STATUS_POLL_INTERVAL_MS);
-		latest = await context.helpers.httpRequestWithAuthentication.call(context, 'postifysApi', {
+		latest = await requestPostifysWithRetry(context, {
 			method: 'GET',
 			baseURL,
 			url: '/api/media/status',
 			qs: { mediaJobId },
 			json: true,
 			timeout: STATUS_REQUEST_TIMEOUT_MS,
-		}) as Record<string, unknown>;
+		});
 	}
 
 	throw new NodeOperationError(context.getNode(), 'Timed out waiting for Postifys media upload to complete.', { itemIndex });
@@ -388,6 +470,7 @@ export const __postifysTestUtils = {
 	normalizePostifysResult,
 	normalizeUploadedMediaResult,
 	isRednoteTempMediaUrl,
+	publishIdempotencyHeaders,
 };
 
 export class Postifys implements INodeType {
@@ -836,6 +919,20 @@ export class Postifys implements INodeType {
 				},
 				default: true,
 				description: 'Whether to return a postId immediately and let Postifys finish uploading/publishing in the background. Use Get Status later if you need the final result. Turn off to wait until the platform publish completes',
+			},
+			{
+				displayName: 'Idempotency Key',
+				name: 'idempotencyKey',
+				type: 'string',
+				displayOptions: {
+					show: {
+						resource: ['post'],
+						operation: ['create'],
+					},
+				},
+				default: '',
+				placeholder: "={{ $json.item_id + ':' + $parameter.platform }}",
+				description: 'Optional stable key for one intended destination post. Postifys replays the original result instead of creating a duplicate when the same key and payload are retried.',
 			},
 			{
 				displayName: 'Text',
@@ -1726,17 +1823,26 @@ export class Postifys implements INodeType {
 					throw new NodeOperationError(this.getNode(), `Unsupported platform: ${platform}`, { itemIndex: i });
 				}
 
+				const idempotencyKey = String(this.getNodeParameter('idempotencyKey', i, '') || '').trim();
+				const requestOptions: IHttpRequestOptions = {
+					method: 'POST',
+					baseURL,
+					url: endpoint,
+					body,
+					json: true,
+					timeout: asyncPublish ? POST_REQUEST_TIMEOUT_MS : 20 * 60 * 1000,
+				};
+				try {
+					const headers = publishIdempotencyHeaders(idempotencyKey);
+					if (Object.keys(headers).length) requestOptions.headers = headers;
+				} catch (error) {
+					throw new NodeOperationError(this.getNode(), (error as Error).message, { itemIndex: i });
+				}
+
 				const responseData = await this.helpers.httpRequestWithAuthentication.call(
 					this,
 					'postifysApi',
-					{
-						method: 'POST',
-						baseURL,
-						url: endpoint,
-						body,
-						json: true,
-						timeout: asyncPublish ? POST_REQUEST_TIMEOUT_MS : 20 * 60 * 1000,
-					} as IHttpRequestOptions,
+					requestOptions,
 				) as Record<string, unknown>;
 
 				returnData.push({

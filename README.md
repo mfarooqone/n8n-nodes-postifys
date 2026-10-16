@@ -12,7 +12,7 @@ Postifys ([postifys.com](https://postifys.com)) is a unified social media publis
 - Downloadable workflow JSON: https://postifys.com/n8n-workflows  
 - Guides: https://postifys.com/guides  
 - Compatibility matrix: https://postifys.com/compatibility-matrix  
-- Pricing: https://postifys.com/pricing ($2 / connected profile / month)
+- Pricing: https://postifys.com/pricing ($4 for the first seat, then $2 per extra seat per month)
 
 ### Honest limitations
 - **TikTok:** approved Direct Post for automatic publishing, plus optional Draft Upload when the creator wants to finish editing in TikTok.

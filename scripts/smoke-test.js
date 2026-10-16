@@ -37,6 +37,7 @@ assert.equal(property('rednoteBatchMode').displayName, 'Auto Map Input Fields');
 assert.equal(property('rednotePostBatchMode').default, true);
 assert.equal(property('rednotePostBatchMode').displayName, 'Auto Map Input Fields');
 assert.equal(property('asyncPublish').default, true);
+assert.equal(property('idempotencyKey').default, '');
 assert.equal(property('statusPath').default, '/api/posts/status');
 assert.equal(typeof node.methods.loadOptions.getTikTokAccounts, 'function');
 assert.equal(typeof node.methods.loadOptions.getTikTokPrivacyLevels, 'function');
@@ -66,6 +67,15 @@ assert.equal(
 assert.equal(
 	__postifysTestUtils.isRednoteTempMediaUrl('https://postifys.com/media/tmp/token/file.mp4'),
 	false,
+);
+assert.deepEqual(
+	__postifysTestUtils.publishIdempotencyHeaders(' job:item:facebook '),
+	{ 'Idempotency-Key': 'job:item:facebook' },
+);
+assert.deepEqual(__postifysTestUtils.publishIdempotencyHeaders(''), {});
+assert.throws(
+	() => __postifysTestUtils.publishIdempotencyHeaders('bad\nheader'),
+	/line breaks/,
 );
 
 assert.deepEqual(
